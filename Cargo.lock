@@ -712,6 +712,7 @@ dependencies = [
  "dashmap",
  "futures-util",
  "hyper",
+ "hyper-tls",
  "once_cell",
  "regex",
  "serde",
