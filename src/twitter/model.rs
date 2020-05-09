@@ -1,10 +1,9 @@
-use crate::model::{DateTime, TweetId};
-
+use crate::model::{CachedString, DateTime, TweetId};
 use serde::de::{SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, PartialEq, Debug)]
 pub struct Tweet {
     pub id: TweetId,
     #[serde(deserialize_with = "deserialize_datetime")]
@@ -15,21 +14,21 @@ pub struct Tweet {
     pub source: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, PartialEq, Debug)]
 pub struct Entities {
-    // In most cases there should only be one item in the `urls` array.
+    // In most cases there should only be one item in the `media` array.
     // We can avoid allocating a `Vec` by using a custom deserializer
-    // that only cares about one of the URLs.
-    #[serde(default, deserialize_with = "deserialize_url")]
-    pub urls: Option<Url>,
+    // that only cares about one of the media items.
+    #[serde(default, deserialize_with = "deserialize_media")]
+    pub media: Option<Media>,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct Url {
-    pub expanded_url: String,
+#[derive(Deserialize, PartialEq, Debug)]
+pub struct Media {
+    pub media_url_https: CachedString,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, PartialEq, Debug)]
 pub struct User {
     pub id: u64,
     pub screen_name: String,
@@ -37,14 +36,14 @@ pub struct User {
     pub profile_image_url_https: String,
 }
 
-fn deserialize_url<'de, D>(deserializer: D) -> Result<Option<Url>, D::Error>
+fn deserialize_media<'de, D>(deserializer: D) -> Result<Option<Media>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    struct UrlVisitor;
+    struct MediaVisitor;
 
-    impl<'de> Visitor<'de> for UrlVisitor {
-        type Value = Option<Url>;
+    impl<'de> Visitor<'de> for MediaVisitor {
+        type Value = Option<Media>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter.write_str("an array of URL objects")
@@ -64,7 +63,7 @@ where
         }
     }
 
-    deserializer.deserialize_seq(UrlVisitor)
+    deserializer.deserialize_seq(MediaVisitor)
 }
 
 // Based heavily on the deserializer from the `twitter-stream-message` crate
@@ -118,4 +117,46 @@ where
     }
 
     deserializer.deserialize_str(DateTimeVisitor)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use chrono::offset::TimeZone;
+
+    #[test]
+    fn parse() -> anyhow::Result<()> {
+        let input = include_str!("../../tests/tweet.json");
+
+        let parsed = serde_json::from_str::<Tweet>(input)?;
+
+        let expected = Tweet {
+            id: 1240718100460273665,
+            created_at: chrono::Utc.ymd(2020, 5, 9).and_hms(22, 55, 25),
+            text: "457BAF34 :参戦ID\n\
+                   参加者募集！\n\
+                   Lv120 フラム＝グラス\n\
+                   https://t.co/sKmVIG5EdK".to_owned(),
+            user: User {
+                id: 2955297975,
+                screen_name: "walfieee".to_owned(),
+                default_profile_image: false,
+                profile_image_url_https:
+                    "https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png"
+                        .to_owned(),
+            },
+            entities: Entities {
+                media: Some(Media {
+                    media_url_https: "https://pbs.twimg.com/media/CVL2EBHUwAA8nUj.jpg".into(),
+                }),
+            },
+            source:
+                "<a href=\"http://granbluefantasy.jp/\" rel=\"nofollow\">グランブルー ファンタジー</a>"
+                    .into(),
+        };
+
+        assert_eq!(parsed, expected);
+
+        Ok(())
+    }
 }

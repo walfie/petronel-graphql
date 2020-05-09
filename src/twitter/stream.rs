@@ -12,6 +12,7 @@ use twitter_stream::Token;
 const TRACK: &'static str = "参加者募集！,:参戦ID,I need backup!,:Battle ID";
 
 fn handle_msg(msg: &str) -> Result<Option<RaidWithImage>> {
+    println!("\n\n{}\n\n", &msg);
     let tweet = serde_json::from_str::<Tweet>(msg)?;
     Ok(RaidWithImage::try_from(tweet).ok())
 }

@@ -132,7 +132,7 @@ impl TryFrom<Tweet> for RaidWithImage {
             language: parsed.language,
         };
 
-        let image_url = tweet.entities.urls.map(|url| url.expanded_url.into());
+        let image_url = tweet.entities.media.map(|media| media.media_url_https);
 
         Ok(RaidWithImage { raid, image_url })
     }
