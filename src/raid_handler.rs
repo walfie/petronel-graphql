@@ -1,8 +1,10 @@
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 
 use crate::model::{Boss, BossName, CachedString, Language, Raid};
 
+use circular_queue::CircularQueue;
 use dashmap::DashMap;
+use parking_lot::RwLock;
 use tokio::sync::broadcast;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -10,16 +12,11 @@ struct BossKey(BossName);
 
 pub struct RaidHandler {
     bosses: DashMap<BossKey, Arc<Boss>>,
-    raid_history: DashMap<BossKey, RaidHistory>,
+    raid_history: DashMap<BossKey, RwLock<CircularQueue<Arc<Raid>>>>,
     raid_broadcast: DashMap<BossKey, broadcast::Sender<Arc<Raid>>>,
     boss_broadcast: broadcast::Sender<Arc<Boss>>,
     translations: DashMap<CachedString, CachedString>,
     capacity: usize,
-}
-
-struct RaidHistory {
-    tx: Mutex<ringbuf::Producer<Arc<Raid>>>,
-    rx: RwLock<ringbuf::Consumer<Arc<Raid>>>,
 }
 
 impl RaidHandler {
@@ -55,12 +52,7 @@ impl RaidHandler {
     pub fn get_history(&self, boss_name: BossName) -> Vec<Arc<Raid>> {
         let key = self.boss_key(boss_name);
         if let Some(guard) = self.raid_history.get(&key) {
-            let mut out = Vec::with_capacity(self.capacity);
-            guard.value().rx.read().unwrap().access(|slice1, slice2| {
-                slice2.iter().rev().for_each(|item| out.push(item.clone()));
-                slice1.iter().rev().for_each(|item| out.push(item.clone()));
-            });
-            out
+            guard.value().read().iter().cloned().collect::<Vec<_>>()
         } else {
             Vec::new()
         }
@@ -99,21 +91,13 @@ impl RaidHandler {
 
         // Update raid history
         if let Some(guard) = self.raid_history.get(&key) {
-            let value = guard.value();
-            let mut rx = value.rx.write().unwrap();
-            if rx.is_full() {
-                let _ = rx.pop();
-            }
-            std::mem::drop(rx);
-            let _ = value.tx.lock().unwrap().push(raid.clone());
+            guard.value().write().push(raid.clone());
         } else {
-            let (mut tx, rx) = ringbuf::RingBuffer::new(self.capacity).split();
-            let _ = tx.push(raid);
-            let tx = Mutex::new(tx);
-            let rx = RwLock::new(rx);
+            let mut queue = CircularQueue::with_capacity(self.capacity);
+            queue.push(raid);
+            let queue = RwLock::new(queue);
 
-            self.raid_history
-                .insert(key.clone(), RaidHistory { tx, rx });
+            self.raid_history.insert(key.clone(), queue);
         }
     }
 }
