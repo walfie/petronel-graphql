@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::model::RaidWithImage;
+use crate::model::Raid;
 use crate::twitter::model::Tweet;
 use futures_util::future::ready;
 use futures_util::stream::{Stream, StreamExt};
@@ -15,15 +15,15 @@ use twitter_stream::Token;
 
 const TRACK: &'static str = "参加者募集！,:参戦ID,I need backup!,:Battle ID";
 
-fn handle_msg(msg: &str) -> Result<Option<RaidWithImage>> {
+fn handle_msg(msg: &str) -> Result<Option<Raid>> {
     let tweet = serde_json::from_str::<Tweet>(msg)?;
-    Ok(RaidWithImage::try_from(tweet).ok())
+    Ok(Raid::try_from(tweet).ok())
 }
 
 pub async fn connect<S, B>(
     service: S,
     token: Token,
-) -> Result<impl Stream<Item = Result<RaidWithImage>>, twitter_stream::Error<S::Error>>
+) -> Result<impl Stream<Item = Result<Raid>>, twitter_stream::Error<S::Error>>
 where
     S: HttpService<B, Response = Response<B>>,
     B: From<Vec<u8>> + HttpBody,
@@ -60,10 +60,7 @@ pub fn connect_with_retries<S, B>(
     token: Token,
     retry_delay: Duration,
     timeout: Duration,
-) -> (
-    impl Stream<Item = RaidWithImage>,
-    impl Future<Output = Error>,
-)
+) -> (impl Stream<Item = Raid>, impl Future<Output = Error>)
 where
     S: HttpService<B, Response = Response<B>> + Clone,
     S::Error: fmt::Display,

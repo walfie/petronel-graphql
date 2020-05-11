@@ -1,4 +1,4 @@
-use crate::model::{Language, Raid, RaidWithImage};
+use crate::model::{Language, Raid};
 use crate::twitter::model::Tweet;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -95,10 +95,10 @@ fn parse_text<'a>(tweet_text: &'a str) -> Option<TextParts<'a>> {
         })
 }
 
-impl TryFrom<Tweet> for RaidWithImage {
+impl TryFrom<Tweet> for Raid {
     type Error = ();
 
-    fn try_from(mut tweet: Tweet) -> Result<RaidWithImage, Self::Error> {
+    fn try_from(mut tweet: Tweet) -> Result<Raid, Self::Error> {
         if tweet.source != GRANBLUE_APP_SOURCE {
             return Err(());
         }
@@ -130,11 +130,10 @@ impl TryFrom<Tweet> for RaidWithImage {
             text: parsed.text.map(ToOwned::to_owned),
             created_at: tweet.created_at,
             language: parsed.language,
+            image_url: tweet.entities.media.map(|media| media.media_url_https),
         };
 
-        let image_url = tweet.entities.media.map(|media| media.media_url_https);
-
-        Ok(RaidWithImage { raid, image_url })
+        Ok(raid)
     }
 }
 

@@ -57,11 +57,6 @@ pub struct Raid {
     pub created_at: DateTime,
     pub text: Option<String>,
     pub language: Language,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct RaidWithImage {
-    pub raid: Raid,
     pub image_url: Option<CachedString>,
 }
 
@@ -80,20 +75,20 @@ fn parse_level(name: &str) -> Option<Level> {
         })
 }
 
-impl From<RaidWithImage> for Boss {
-    fn from(r: RaidWithImage) -> Self {
-        let lang = r.raid.language;
+impl From<Raid> for Boss {
+    fn from(raid: Raid) -> Self {
+        let lang = raid.language;
 
-        let image = match r.image_url {
+        let image = match raid.image_url {
             None => LangString::empty(),
             Some(url) => LangString::new(lang, url),
         };
 
         Self {
             image,
-            last_seen: r.raid.created_at,
-            level: parse_level(&r.raid.boss_name),
-            name: LangString::new(lang, r.raid.boss_name),
+            last_seen: raid.created_at,
+            level: parse_level(&raid.boss_name),
+            name: LangString::new(lang, raid.boss_name),
         }
     }
 }
