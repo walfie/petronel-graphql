@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 pub type CachedString = string_cache::DefaultAtom;
+pub type BossName = CachedString;
 pub type DateTime = chrono::DateTime<chrono::Utc>;
 pub type Level = i16;
 pub type TweetId = u64;
@@ -20,11 +21,25 @@ pub struct LangString {
 }
 
 impl LangString {
-    fn empty() -> Self {
+    pub fn empty() -> Self {
         Self { en: None, ja: None }
     }
 
-    fn new(lang: Language, value: CachedString) -> Self {
+    pub fn get(&self, lang: Language) -> Option<&CachedString> {
+        match lang {
+            Language::English => self.en.as_ref(),
+            Language::Japanese => self.ja.as_ref(),
+        }
+    }
+
+    pub fn set(&mut self, lang: Language, value: Option<CachedString>) {
+        match lang {
+            Language::English => self.en = value,
+            Language::Japanese => self.ja = value,
+        }
+    }
+
+    pub fn new(lang: Language, value: CachedString) -> Self {
         match lang {
             Language::English => Self {
                 en: Some(value),
@@ -42,7 +57,7 @@ impl LangString {
 pub struct Boss {
     pub name: LangString,
     pub image: LangString,
-    pub last_seen: DateTime,
+    pub last_seen_at: DateTime,
     pub level: Option<Level>,
     // TODO: Image hash
 }
@@ -53,7 +68,7 @@ pub struct Raid {
     pub tweet_id: TweetId,
     pub user_name: String,
     pub user_image: Option<String>,
-    pub boss_name: CachedString,
+    pub boss_name: BossName,
     pub created_at: DateTime,
     pub text: Option<String>,
     pub language: Language,
@@ -75,20 +90,20 @@ fn parse_level(name: &str) -> Option<Level> {
         })
 }
 
-impl From<Raid> for Boss {
-    fn from(raid: Raid) -> Self {
+impl From<&Raid> for Boss {
+    fn from(raid: &Raid) -> Self {
         let lang = raid.language;
 
         let image = match raid.image_url {
             None => LangString::empty(),
-            Some(url) => LangString::new(lang, url),
+            Some(ref url) => LangString::new(lang, url.clone()),
         };
 
         Self {
             image,
-            last_seen: raid.created_at,
+            last_seen_at: raid.created_at,
             level: parse_level(&raid.boss_name),
-            name: LangString::new(lang, raid.boss_name),
+            name: LangString::new(lang, raid.boss_name.clone()),
         }
     }
 }
