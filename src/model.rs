@@ -39,6 +39,13 @@ impl LangString {
         }
     }
 
+    pub fn merge(&self, other: &LangString) -> Self {
+        Self {
+            en: self.en.as_ref().or(other.en.as_ref()).cloned(),
+            ja: self.ja.as_ref().or(other.ja.as_ref()).cloned(),
+        }
+    }
+
     pub fn new(lang: Language, value: CachedString) -> Self {
         match lang {
             Language::English => Self {
@@ -57,7 +64,6 @@ impl LangString {
 pub struct Boss {
     pub name: LangString,
     pub image: LangString,
-    pub last_seen_at: DateTime,
     pub level: Option<Level>,
     // TODO: Image hash
 }
@@ -101,7 +107,6 @@ impl From<&Raid> for Boss {
 
         Self {
             image,
-            last_seen_at: raid.created_at,
             level: parse_level(&raid.boss_name),
             name: LangString::new(lang, raid.boss_name.clone()),
         }
