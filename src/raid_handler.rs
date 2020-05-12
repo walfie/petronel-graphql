@@ -34,19 +34,15 @@ impl RaidHandler {
         }
     }
 
-    fn boss_key(&self, boss_name: BossName, lang: Option<Language>) -> BossKey {
-        if lang == Some(Language::Japanese) {
-            BossKey(boss_name)
-        } else {
-            match self.translations.get(&boss_name) {
-                None => BossKey(boss_name),
-                Some(elem) => BossKey(elem.value().clone()),
-            }
+    fn boss_key(&self, boss_name: BossName) -> BossKey {
+        match self.translations.get(&boss_name) {
+            None => BossKey(boss_name),
+            Some(elem) => BossKey(elem.value().clone()),
         }
     }
 
     pub fn get_history(&self, boss_name: BossName) -> Vec<Arc<Raid>> {
-        let key = self.boss_key(boss_name, None);
+        let key = self.boss_key(boss_name);
         if let Some(guard) = self.raid_history.get(&key) {
             guard.value().read().iter().cloned().collect::<Vec<_>>()
         } else {
@@ -56,7 +52,7 @@ impl RaidHandler {
 
     pub fn boss(&self, name: BossName) -> Option<Arc<Boss>> {
         self.bosses
-            .get(&self.boss_key(name, None))
+            .get(&self.boss_key(name))
             .map(|guard| guard.value().clone())
     }
 
@@ -109,7 +105,12 @@ impl RaidHandler {
     }
 
     pub fn push(&self, raid: Raid) {
-        let key = self.boss_key(raid.boss_name.clone(), Some(raid.language));
+        let key = if raid.language == Language::Japanese {
+            BossKey(raid.boss_name.clone())
+        } else {
+            self.boss_key(raid.boss_name.clone())
+        };
+
         let raid = Arc::new(raid);
 
         // Broadcast the raid to all listeners of this boss
