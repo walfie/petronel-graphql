@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use std::sync::Arc;
 
 use crate::model::{Boss, BossName, CachedString, Language, Raid};
@@ -10,7 +11,23 @@ use tokio::sync::broadcast;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct BossKey(BossName);
 
-pub struct RaidHandler {
+pub struct RaidHandler(Arc<RaidHandlerInner>);
+
+impl RaidHandler {
+    pub fn new(capacity: usize) -> Self {
+        Self(Arc::new(RaidHandlerInner::new(capacity)))
+    }
+}
+
+impl Deref for RaidHandler {
+    type Target = RaidHandlerInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub struct RaidHandlerInner {
     bosses: DashMap<BossKey, Arc<Boss>>,
     raid_history: DashMap<BossKey, RwLock<CircularQueue<Arc<Raid>>>>,
     raid_broadcast: DashMap<BossKey, broadcast::Sender<Arc<Raid>>>,
@@ -19,9 +36,9 @@ pub struct RaidHandler {
     capacity: usize,
 }
 
-impl RaidHandler {
+impl RaidHandlerInner {
     // TODO: Initialize with existing bosses
-    pub fn new(capacity: usize) -> Self {
+    fn new(capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(capacity);
 
         Self {
