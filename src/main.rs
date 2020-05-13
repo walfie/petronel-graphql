@@ -1,9 +1,10 @@
 mod log;
 
-use futures_util::stream::StreamExt;
+use std::time::Duration;
+
+use futures::stream::StreamExt;
 use petronel_graphql::twitter::{connect_with_retries, Token};
 use structopt::StructOpt;
-use tokio::time::Duration;
 
 #[derive(Debug, StructOpt)]
 struct Opt {

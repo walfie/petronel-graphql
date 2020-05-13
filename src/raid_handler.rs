@@ -8,7 +8,7 @@ use crate::model::{Boss, BossName, CachedString, Language, Raid};
 
 use circular_queue::CircularQueue;
 use dashmap::DashMap;
-use futures_util::stream::Stream;
+use futures::stream::Stream;
 use parking_lot::RwLock;
 use tokio::stream::StreamExt;
 use tokio::sync::broadcast;
@@ -41,7 +41,7 @@ impl Stream for Subscription {
         let mut this = self.project();
 
         loop {
-            match futures_util::ready!(this.rx.as_mut().poll_next(cx)) {
+            match futures::ready!(this.rx.as_mut().poll_next(cx)) {
                 Some(Ok(item)) => return Poll::Ready(Some(item)),
                 Some(Err(broadcast::RecvError::Lagged(_))) => continue,
                 Some(Err(broadcast::RecvError::Closed)) => (),
@@ -249,7 +249,7 @@ mod test {
     use crate::model::LangString;
     use chrono::offset::TimeZone;
     use chrono::Utc;
-    use futures_util::stream::StreamExt;
+    use futures::stream::StreamExt;
 
     const BOSS_NAME_JA: &'static str = "Lv60 オオゾラッコ";
     const BOSS_NAME_EN: &'static str = "Lvl 60 Ozorotter";

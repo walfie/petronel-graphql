@@ -1,15 +1,17 @@
+use std::time::Duration;
+
 use crate::error::{Error, Result};
 use crate::model::Raid;
 use crate::twitter::model::Tweet;
-use futures_util::future::ready;
-use futures_util::stream::{Stream, StreamExt};
+
+use futures::future::ready;
+use futures::stream::{Stream, StreamExt};
 use hyper::body::HttpBody;
 use hyper::http::{Response, StatusCode};
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
 use tokio::sync::mpsc;
-use tokio::time::Duration;
 use twitter_stream::service::HttpService;
 use twitter_stream::Token;
 
