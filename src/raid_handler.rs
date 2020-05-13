@@ -239,96 +239,100 @@ mod test {
     use chrono::Utc;
     use futures_util::stream::StreamExt;
 
+    const BOSS_NAME_JA: &'static str = "Lv60 オオゾラッコ";
+    const BOSS_NAME_EN: &'static str = "Lvl 60 Ozorotter";
+
     #[tokio::test]
     async fn get_history() {
+        use Language::{English, Japanese};
+
         let capacity = 2;
 
         let handler = RaidHandler::new(capacity);
-        let boss_name_ja = BossName::from("Lv60 オオゾラッコ");
-        let boss_name_en = BossName::from("Lvl 60 Ozorotter");
 
-        let mut subscriber_ja = handler.subscribe(boss_name_ja.clone());
-        let mut subscriber_en = handler.subscribe(boss_name_en.clone());
+        let mut subscriber_ja = handler.subscribe(BOSS_NAME_JA.into());
+        let mut subscriber_en = handler.subscribe(BOSS_NAME_EN.into());
+
+        fn next(raid: &Raid, language: Language) -> Raid {
+            let mut raid = raid.clone();
+            raid.tweet_id += 1;
+            raid.id = raid.tweet_id.to_string().into();
+            raid.created_at = raid.created_at + chrono::Duration::seconds(1);
+            raid.language = language;
+            raid.boss_name = match language {
+                Japanese => BOSS_NAME_JA.into(),
+                English => BOSS_NAME_EN.into(),
+            };
+            raid
+        }
 
         let raid1 = Raid {
             id: "1".into(),
             tweet_id: 1,
             user_name: "walfieee".into(),
             user_image: None,
-            boss_name: boss_name_ja.clone(),
+            boss_name: BOSS_NAME_JA.into(),
             created_at: Utc.ymd(2020, 5, 20).and_hms(1, 2, 3),
             text: Some("Help".into()),
             language: Language::Japanese,
             image_url: None,
         };
 
-        assert!(handler.get_history(boss_name_ja.clone()).is_empty());
-        assert!(handler.get_history(boss_name_en.clone()).is_empty());
+        assert!(handler.get_history(BOSS_NAME_JA.into()).is_empty());
+        assert!(handler.get_history(BOSS_NAME_EN.into()).is_empty());
         assert!(handler.bosses().is_empty());
 
         handler.push(raid1.clone());
         assert_eq!(
-            handler.get_history(boss_name_ja.clone()),
+            handler.get_history(BOSS_NAME_JA.into()),
             vec![Arc::new(raid1.clone())]
         );
         assert_eq!(handler.bosses(), vec![Arc::new(Boss::from(&raid1))]);
         assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid1.clone()));
 
-        let mut raid2 = raid1.clone();
-        raid2.id = "2".into();
-        raid2.tweet_id = 2;
-        raid2.created_at = raid1.created_at + chrono::Duration::minutes(1);
-        raid2.text = None;
+        let raid2 = next(&raid1, Japanese);
 
         // Items should be returned latest first
         handler.push(raid2.clone());
         assert_eq!(
-            handler.get_history(boss_name_ja.clone()),
+            handler.get_history(BOSS_NAME_JA.into()),
             vec![Arc::new(raid2.clone()), Arc::new(raid1.clone())]
         );
         assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid2.clone()));
 
         // When capacity is full, old entries should be overwritten
-        let mut raid3 = raid2.clone();
-        raid3.id = "3".into();
-        raid3.tweet_id = 3;
-        raid3.created_at = raid2.created_at + chrono::Duration::minutes(1);
+        let raid3 = next(&raid2, Japanese);
         handler.push(raid3.clone());
         assert_eq!(
-            handler.get_history(boss_name_ja.clone()),
+            handler.get_history(BOSS_NAME_JA.into()),
             vec![Arc::new(raid3.clone()), Arc::new(raid2.clone())]
         );
         assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid3.clone()));
 
         // Push a raid from a boss with a different name
-        let mut raid4 = raid3.clone();
-        raid4.id = "4".into();
-        raid4.tweet_id = 4;
-        raid4.boss_name = boss_name_en.clone();
-        raid4.language = Language::English;
-        raid4.created_at = raid3.created_at + chrono::Duration::minutes(1);
+        let raid4 = next(&raid3, English);
         handler.push(raid4.clone());
         assert_eq!(
-            handler.get_history(boss_name_en.clone()),
+            handler.get_history(BOSS_NAME_EN.into()),
             vec![Arc::new(raid4.clone())]
         );
         assert_eq!(subscriber_en.next().await.unwrap(), Arc::new(raid4.clone()));
 
         // Merge the two bosses. The history should be merged, as well as the boss entries and broadcast.
-        handler.merge(boss_name_en.clone(), boss_name_ja.clone());
+        handler.merge(BOSS_NAME_EN.into(), BOSS_NAME_JA.into());
         assert_eq!(
-            handler.get_history(boss_name_en.clone()),
+            handler.get_history(BOSS_NAME_EN.into()),
             vec![Arc::new(raid4.clone()), Arc::new(raid3.clone())]
         );
         assert_eq!(
-            handler.get_history(boss_name_ja.clone()),
+            handler.get_history(BOSS_NAME_JA.into()),
             vec![Arc::new(raid4.clone()), Arc::new(raid3.clone())]
         );
 
         let expected_boss = Arc::new(Boss {
             name: LangString {
-                en: Some(boss_name_en.clone()),
-                ja: Some(boss_name_ja.clone()),
+                en: Some(BOSS_NAME_EN.into()),
+                ja: Some(BOSS_NAME_JA.into()),
             },
             image: LangString {
                 en: raid4.image_url.as_ref().cloned(),
@@ -337,17 +341,15 @@ mod test {
             ..Boss::from(&raid1)
         });
         assert_eq!(
-            handler.boss(boss_name_en.clone()),
+            handler.boss(BOSS_NAME_EN.into()),
             Some(expected_boss.clone())
         );
-        assert_eq!(handler.boss(boss_name_ja.clone()), Some(expected_boss));
+        assert_eq!(handler.boss(BOSS_NAME_JA.into()), Some(expected_boss));
 
-        // The next raid should get sent to both `en` and `ja` subscribers
-        let mut raid5 = raid4.clone();
-        raid5.id = "5".into();
-        raid5.tweet_id = 5;
-        raid5.boss_name = boss_name_ja.clone();
-        raid5.created_at = raid4.created_at + chrono::Duration::minutes(1);
+        // The next raid should get sent to `en` and `ja` subscribers, including new ones
+        let mut subscriber_en2 = handler.subscribe(BOSS_NAME_EN.into());
+        let mut subscriber_ja2 = handler.subscribe(BOSS_NAME_JA.into());
+        let raid5 = next(&raid4, Japanese);
         {
             let raid5 = raid5.clone();
             let handler = handler.clone();
@@ -358,16 +360,19 @@ mod test {
                 handler.push(raid5);
             });
         }
-        assert_eq!(subscriber_en.next().await.unwrap(), Arc::new(raid5.clone()));
-        assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid5.clone()));
+        let expected = Some(Arc::new(raid5.clone()));
+        assert_eq!(subscriber_en.next().await, expected);
+        assert_eq!(subscriber_en2.next().await, expected);
+        assert_eq!(subscriber_ja.next().await, expected);
+        assert_eq!(subscriber_ja2.next().await, expected);
 
-        let mut raid6 = raid5.clone();
-        raid6.id = "6".into();
-        raid6.tweet_id = 6;
-        raid6.boss_name = boss_name_en.clone();
-        raid6.created_at = raid5.created_at + chrono::Duration::minutes(1);
+        // English boss name should also go to both subscribers
+        let raid6 = next(&raid5, English);
         handler.push(raid6.clone());
-        assert_eq!(subscriber_en.next().await.unwrap(), Arc::new(raid6.clone()));
-        assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid6.clone()));
+        let expected = Some(Arc::new(raid6.clone()));
+        assert_eq!(subscriber_en.next().await, expected);
+        assert_eq!(subscriber_en2.next().await, expected);
+        assert_eq!(subscriber_ja.next().await, expected);
+        assert_eq!(subscriber_ja2.next().await, expected);
     }
 }
