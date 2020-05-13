@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -9,10 +10,17 @@ use circular_queue::CircularQueue;
 use dashmap::DashMap;
 use futures_util::stream::Stream;
 use parking_lot::RwLock;
+use tokio::stream::StreamExt;
 use tokio::sync::broadcast;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct BossKey(BossName);
+
+impl Borrow<str> for BossKey {
+    fn borrow(&self) -> &str {
+        self.0.as_ref()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct RaidHandler(Arc<RaidHandlerInner>);
@@ -109,6 +117,10 @@ impl RaidHandlerInner {
             self.raid_broadcast.insert(key, tx);
             rx
         }
+    }
+
+    pub fn subscribe_boss_updates(&self) -> impl Stream<Item = Arc<Boss>> {
+        self.boss_broadcast.subscribe().filter_map(Result::ok)
     }
 
     fn boss_key(&self, boss_name: BossName) -> BossKey {
@@ -252,6 +264,7 @@ mod test {
 
         let mut subscriber_ja = handler.subscribe(BOSS_NAME_JA.into());
         let mut subscriber_en = handler.subscribe(BOSS_NAME_EN.into());
+        let mut boss_subscriber = handler.subscribe_boss_updates();
 
         fn next(raid: &Raid, language: Language) -> Raid {
             let mut raid = raid.clone();
@@ -289,6 +302,10 @@ mod test {
         );
         assert_eq!(handler.bosses(), vec![Arc::new(Boss::from(&raid1))]);
         assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid1.clone()));
+        assert_eq!(
+            boss_subscriber.next().await.unwrap(),
+            Arc::new(Boss::from(&raid1))
+        );
 
         let raid2 = next(&raid1, Japanese);
 
@@ -317,6 +334,10 @@ mod test {
             vec![Arc::new(raid4.clone())]
         );
         assert_eq!(subscriber_en.next().await.unwrap(), Arc::new(raid4.clone()));
+        assert_eq!(
+            boss_subscriber.next().await.unwrap(),
+            Arc::new(Boss::from(&raid4))
+        );
 
         // Merge the two bosses. The history should be merged, as well as the boss entries and broadcast.
         handler.merge(BOSS_NAME_EN.into(), BOSS_NAME_JA.into());
@@ -340,11 +361,9 @@ mod test {
             },
             ..Boss::from(&raid1)
         });
-        assert_eq!(
-            handler.boss(BOSS_NAME_EN.into()),
-            Some(expected_boss.clone())
-        );
-        assert_eq!(handler.boss(BOSS_NAME_JA.into()), Some(expected_boss));
+        assert_eq!(handler.boss(BOSS_NAME_EN.into()).unwrap(), expected_boss);
+        assert_eq!(handler.boss(BOSS_NAME_JA.into()).unwrap(), expected_boss);
+        assert_eq!(boss_subscriber.next().await.unwrap(), expected_boss);
 
         // The next raid should get sent to `en` and `ja` subscribers, including new ones
         let mut subscriber_en2 = handler.subscribe(BOSS_NAME_EN.into());
