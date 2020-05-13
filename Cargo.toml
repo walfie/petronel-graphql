@@ -24,6 +24,14 @@ slog-term = "2.5.0"
 string_cache = "0.8.0"
 structopt = "0.3.14"
 thiserror = "1.0.16"
-tokio = { version = "0.2.20", features = ["macros", "sync", "time"] }
 tower = "0.3.1"
 twitter-stream = "0.10.0-alpha.6"
+pin-project-lite = "0.1.5"
+
+[dependencies.tokio]
+git = "https://github.com/tokio-rs/tokio.git"
+rev = "fb7dfcf4322b5e60604815aea91266b88f0b7823"
+features = ["macros", "sync", "time", "stream", "parking_lot", "rt-core"]
+
+[dev-dependencies]
+tokio-test = "0.2.1"
