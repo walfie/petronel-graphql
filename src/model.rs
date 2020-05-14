@@ -1,12 +1,38 @@
+use chrono::offset::{TimeZone, Utc};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::cmp::Ordering;
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::Ordering::Relaxed;
 
 pub type CachedString = string_cache::DefaultAtom;
 pub type BossName = CachedString;
-pub type DateTime = chrono::DateTime<chrono::Utc>;
+pub type DateTime = chrono::DateTime<Utc>;
 pub type Level = i16;
 pub type TweetId = u64;
 pub type RaidId = String;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Boss {
+    pub name: LangString,
+    pub image: LangString,
+    pub level: Option<Level>,
+    pub last_seen_at: AtomicDateTime,
+    // TODO: Image hash
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Raid {
+    pub id: RaidId,
+    pub tweet_id: TweetId,
+    pub user_name: String,
+    pub user_image: Option<String>,
+    pub boss_name: BossName,
+    pub created_at: DateTime,
+    pub text: Option<String>,
+    pub language: Language,
+    pub image_url: Option<CachedString>,
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Language {
@@ -60,26 +86,53 @@ impl LangString {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Boss {
-    pub name: LangString,
-    pub image: LangString,
-    pub level: Option<Level>,
-    // TODO: Image hash
+#[derive(Debug)]
+pub struct AtomicDateTime(AtomicI64);
+impl AtomicDateTime {
+    pub fn replace(&self, value: &DateTime) {
+        self.0.store(value.timestamp_millis(), Relaxed)
+    }
+
+    pub fn as_datetime(&self) -> DateTime {
+        Utc.timestamp_millis(self.0.load(Relaxed))
+    }
+
+    pub fn as_i64(&self) -> i64 {
+        self.0.load(Relaxed)
+    }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Raid {
-    pub id: RaidId,
-    pub tweet_id: TweetId,
-    pub user_name: String,
-    pub user_image: Option<String>,
-    pub boss_name: BossName,
-    pub created_at: DateTime,
-    pub text: Option<String>,
-    pub language: Language,
-    pub image_url: Option<CachedString>,
+impl Ord for AtomicDateTime {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.as_i64().cmp(&other.as_i64())
+    }
 }
+
+impl PartialOrd for AtomicDateTime {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.as_i64().partial_cmp(&other.as_i64())
+    }
+}
+
+impl Clone for AtomicDateTime {
+    fn clone(&self) -> Self {
+        AtomicDateTime(AtomicI64::new(self.as_i64()))
+    }
+}
+
+impl From<&DateTime> for AtomicDateTime {
+    fn from(value: &DateTime) -> AtomicDateTime {
+        AtomicDateTime(AtomicI64::new(value.timestamp_millis()))
+    }
+}
+
+impl PartialEq for AtomicDateTime {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_i64() == other.as_i64()
+    }
+}
+
+impl Eq for AtomicDateTime {}
 
 static REGEX_LEVEL: Lazy<Regex> =
     Lazy::new(|| Regex::new("^Lv(?:l )?(?P<level>[0-9]+) ").expect("invalid level regex"));
@@ -109,6 +162,7 @@ impl From<&Raid> for Boss {
             image,
             level: parse_level(&raid.boss_name),
             name: LangString::new(lang, raid.boss_name.clone()),
+            last_seen_at: (&raid.created_at).into(),
         }
     }
 }

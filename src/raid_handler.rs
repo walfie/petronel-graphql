@@ -162,6 +162,7 @@ impl RaidHandlerInner {
             let mut boss = Boss::clone(&dst_boss);
             boss.name = boss.name.merge(&src_boss.name);
             boss.image = boss.image.merge(&src_boss.image);
+            boss.last_seen_at = (&dst_boss.last_seen_at).max(&src_boss.last_seen_at).clone();
             let boss = Arc::new(boss);
             self.bosses.insert(dst_key.clone(), boss.clone());
             self.bosses.remove(&src_key);
@@ -209,8 +210,8 @@ impl RaidHandlerInner {
         }
 
         if let Some(guard) = self.bosses.get(&key) {
-            // TODO: Update last_seen_at
             let boss = guard.value();
+            boss.last_seen_at.replace(&raid.created_at);
 
             // If the incoming raid has an image URL but the existing boss doesn't, update the image
             if boss.image.get(raid.language).is_none() && raid.image_url.is_some() {
@@ -359,7 +360,7 @@ mod test {
                 en: raid4.image_url.as_ref().cloned(),
                 ja: raid1.image_url.as_ref().cloned(),
             },
-            ..Boss::from(&raid1)
+            ..Boss::from(&raid4)
         });
         assert_eq!(handler.boss(BOSS_NAME_EN.into()).unwrap(), expected_boss);
         assert_eq!(handler.boss(BOSS_NAME_JA.into()).unwrap(), expected_boss);
