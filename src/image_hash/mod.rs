@@ -57,7 +57,9 @@ mod test {
         hash: ImageHash,
     }
 
-    // Expensive tests should be run with `cargo test --features integration`
+    // This test is slow to run, and is enabled with `--features integration`.
+    // To see console output as results come in, run with `--nocapture`.
+    // i.e., `cargo test --features integration -- --nocapture`
     #[cfg_attr(not(feature = "integration"), ignore)]
     #[tokio::test]
     async fn raid_equality() -> anyhow::Result<()> {
@@ -188,6 +190,7 @@ mod test {
             let hasher = hasher.clone();
             async move {
                 let hash = hasher.hash(&format!("{}:large", url)).await?;
+                eprintln!("{} -> {:?}", name, hash);
                 let result: anyhow::Result<Item> = Ok(Item {
                     name,
                     level: *level,
@@ -198,10 +201,12 @@ mod test {
             }
         });
 
-        let results = futures::future::join_all(futures)
-            .await
-            .into_iter()
-            .collect::<anyhow::Result<Vec<Item>>>()?;
+        use futures::stream::StreamExt;
+        use futures::stream::TryStreamExt;
+        let results: Vec<Item> = futures::stream::iter(futures)
+            .buffer_unordered(bosses.len())
+            .try_collect()
+            .await?;
 
         use itertools::Itertools;
         let equivalent_bosses = results
