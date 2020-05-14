@@ -6,8 +6,8 @@ use crate::twitter::model::Tweet;
 
 use futures::future::ready;
 use futures::stream::{Stream, StreamExt};
+use http::{Response, StatusCode};
 use hyper::body::HttpBody;
-use hyper::http::{Response, StatusCode};
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
@@ -85,7 +85,7 @@ where
                         Ok(Some(Ok(msg))) => {
                             if let Err(_) = tx.send(msg) {
                                 // Stream closed by receiver
-                                return Error::Closed;
+                                return Error::StreamClosed;
                             }
                         }
                         Ok(Some(Err(e))) => {

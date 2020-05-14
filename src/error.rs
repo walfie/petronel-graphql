@@ -1,4 +1,4 @@
-use hyper::http::StatusCode;
+use http::StatusCode;
 use thiserror::Error;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -11,6 +11,12 @@ pub enum Error {
     Twitter(#[from] twitter_stream::hyper::Error),
     #[error("HTTP error: {0}")]
     Http(StatusCode),
+    #[error("HTTP client error: {0}")]
+    Hyper(#[from] hyper::Error),
+    #[error("failed to load image: {0}")]
+    Image(#[from] image::error::ImageError),
+    #[error("failed to parse URI: {0}")]
+    InvalidUri(#[from] http::uri::InvalidUri),
     #[error("stream was closed by receiver")]
-    Closed,
+    StreamClosed,
 }
