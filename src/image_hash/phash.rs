@@ -5,7 +5,7 @@ const SIZE: usize = 32;
 const SMALL_SIZE: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ImageHash(i64);
+pub struct ImageHash(pub(crate) i64);
 
 impl ImageHash {
     pub fn new(img: &DynamicImage) -> Self {

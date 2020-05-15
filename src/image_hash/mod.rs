@@ -1,15 +1,17 @@
 mod phash;
+mod stream;
 
 use crate::error::Result;
 pub use crate::image_hash::phash::ImageHash;
 
 use async_trait::async_trait;
+use http::Uri;
 
 type HttpsClient = hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>;
 
 #[async_trait]
-trait ImageHasher {
-    async fn hash(&self, url: &str) -> Result<ImageHash>;
+pub trait ImageHasher {
+    async fn hash(&self, uri: Uri) -> Result<ImageHash>;
 }
 
 #[derive(Clone, Debug)]
@@ -25,8 +27,8 @@ impl HyperImageHasher {
 
 #[async_trait]
 impl ImageHasher for HyperImageHasher {
-    async fn hash(&self, url: &str) -> Result<ImageHash> {
-        let resp = self.client.get(url.parse()?).await?;
+    async fn hash(&self, uri: Uri) -> Result<ImageHash> {
+        let resp = self.client.get(uri).await?;
         let body = hyper::body::to_bytes(resp).await?;
         Ok(crop_and_hash(&body)?)
     }
@@ -189,7 +191,8 @@ mod test {
         let futures = bosses.iter().map(move |(name, level, language, url)| {
             let hasher = hasher.clone();
             async move {
-                let hash = hasher.hash(&format!("{}:large", url)).await?;
+                let uri = format!("{}:large", url).parse().unwrap();
+                let hash = hasher.hash(uri).await?;
                 eprintln!("{} -> {:?}", name, hash);
                 let result: anyhow::Result<Item> = Ok(Item {
                     name,
