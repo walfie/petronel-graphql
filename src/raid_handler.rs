@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::model::{Boss, BossName, CachedString, Language, Raid};
+use crate::model::{Boss, BossName, CachedString, ImageHash, Language, Raid};
 
 use circular_queue::CircularQueue;
 use dashmap::DashMap;
@@ -14,7 +14,7 @@ use tokio::stream::StreamExt;
 use tokio::sync::broadcast;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct BossKey(BossName);
+struct BossKey(pub(crate) BossName);
 
 impl Borrow<str> for BossKey {
     fn borrow(&self) -> &str {
@@ -152,7 +152,43 @@ impl RaidHandlerInner {
             .collect::<Vec<_>>()
     }
 
-    pub fn merge(&self, src: BossName, dst: BossName) {
+    pub fn update_image_hash(&self, name: BossName, image_hash: ImageHash) {
+        let key = self.boss_key(name.clone());
+        if let Some(guard) = self.bosses.get(&key) {
+            let boss = guard.value();
+            if boss.image_hash == Some(image_hash) {
+                return; // Do nothing, it's already set
+            }
+
+            let mut boss = Boss::clone(&boss);
+            boss.image_hash = Some(image_hash);
+            let boss = Arc::new(boss);
+            self.bosses.insert(key, boss.clone());
+
+            let is_japanese = boss.name.ja.is_some();
+
+            // Iterate through boss list to find a boss with the same image hash and level
+            for item in self.bosses.iter() {
+                let other_boss_name = &item.key().0;
+                let other_boss = item.value();
+                if other_boss.image_hash == Some(image_hash)
+                    && other_boss.level == boss.level
+                    && other_boss_name != &name
+                {
+                    if is_japanese {
+                        self.merge(other_boss_name.clone(), name);
+                    } else {
+                        self.merge(name, other_boss_name.clone());
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    // `dst` should be the Japanese boss name
+    // TODO: Make this less error-prone
+    fn merge(&self, src: BossName, dst: BossName) {
         let src_key = BossKey(src.clone());
         let dst_key = BossKey(dst.clone());
 
@@ -341,15 +377,8 @@ mod test {
         );
 
         // Merge the two bosses. The history should be merged, as well as the boss entries and broadcast.
-        handler.merge(BOSS_NAME_EN.into(), BOSS_NAME_JA.into());
-        assert_eq!(
-            handler.get_history(BOSS_NAME_EN.into()),
-            vec![Arc::new(raid4.clone()), Arc::new(raid3.clone())]
-        );
-        assert_eq!(
-            handler.get_history(BOSS_NAME_JA.into()),
-            vec![Arc::new(raid4.clone()), Arc::new(raid3.clone())]
-        );
+        handler.update_image_hash(BOSS_NAME_EN.into(), ImageHash(123));
+        handler.update_image_hash(BOSS_NAME_JA.into(), ImageHash(123));
 
         let expected_boss = Arc::new(Boss {
             name: LangString {
@@ -360,8 +389,18 @@ mod test {
                 en: raid4.image_url.as_ref().cloned(),
                 ja: raid1.image_url.as_ref().cloned(),
             },
+            image_hash: Some(ImageHash(123)),
             ..Boss::from(&raid4)
         });
+        assert_eq!(
+            handler.get_history(BOSS_NAME_EN.into()),
+            vec![Arc::new(raid4.clone()), Arc::new(raid3.clone())]
+        );
+        assert_eq!(
+            handler.get_history(BOSS_NAME_JA.into()),
+            vec![Arc::new(raid4.clone()), Arc::new(raid3.clone())]
+        );
+
         assert_eq!(handler.boss(BOSS_NAME_EN.into()).unwrap(), expected_boss);
         assert_eq!(handler.boss(BOSS_NAME_JA.into()).unwrap(), expected_boss);
         assert_eq!(boss_subscriber.next().await.unwrap(), expected_boss);

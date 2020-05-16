@@ -5,6 +5,8 @@ use std::cmp::Ordering;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering::Relaxed;
 
+pub use crate::image_hash::phash::ImageHash;
+
 pub type CachedString = string_cache::DefaultAtom;
 pub type BossName = CachedString;
 pub type DateTime = chrono::DateTime<Utc>;
@@ -18,7 +20,7 @@ pub struct Boss {
     pub image: LangString,
     pub level: Option<Level>,
     pub last_seen_at: AtomicDateTime,
-    // TODO: Image hash
+    pub image_hash: Option<ImageHash>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -160,6 +162,7 @@ impl From<&Raid> for Boss {
 
         Self {
             image,
+            image_hash: None,
             level: parse_level(&raid.boss_name),
             name: LangString::new(lang, raid.boss_name.clone()),
             last_seen_at: (&raid.created_at).into(),

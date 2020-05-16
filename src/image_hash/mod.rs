@@ -1,5 +1,6 @@
-mod phash;
+pub(crate) mod phash;
 mod stream;
+mod updater;
 
 use crate::error::Result;
 pub use crate::image_hash::phash::ImageHash;

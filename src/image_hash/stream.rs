@@ -174,7 +174,7 @@ mod test {
 
         // On drop, the stream should end
         drop(tx);
-        assert!(dbg!(rx.next().await).is_none());
+        assert!(rx.next().await.is_none());
 
         Ok(())
     }
