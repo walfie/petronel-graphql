@@ -3,7 +3,8 @@ mod log;
 use std::time::Duration;
 
 use futures::stream::StreamExt;
-use petronel_graphql::twitter::{connect_with_retries, Token};
+use petronel_graphql::image_hash::HyperImageHasher;
+use petronel_graphql::{image_hash, twitter, RaidHandler};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -39,7 +40,7 @@ struct Opt {
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::from_args();
 
-    let token = Token::new(
+    let token = twitter::Token::new(
         opt.consumer_key,
         opt.consumer_secret,
         opt.access_token,
@@ -51,7 +52,18 @@ async fn main() -> anyhow::Result<()> {
     let conn = hyper_tls::HttpsConnector::new();
     let client = hyper::Client::builder().build::<_, hyper::Body>(conn);
 
-    let (mut stream, worker) = connect_with_retries(
+    let capacity = 10; // TODO: configurable
+    let concurrency = 5; // TODO: configurable
+    let raid_handler = RaidHandler::new(capacity);
+    let hash_updater = image_hash::Updater::new(
+        log.clone(),
+        HyperImageHasher::new(client.clone()),
+        raid_handler.clone(),
+        concurrency,
+    );
+    tokio::spawn(hash_updater.run());
+
+    let (mut tweet_stream, worker) = twitter::connect_with_retries(
         log,
         client,
         token,
@@ -60,8 +72,8 @@ async fn main() -> anyhow::Result<()> {
     );
     tokio::spawn(worker);
 
-    while let Some(item) = stream.next().await {
-        let _ = dbg!(item);
+    while let Some(item) = tweet_stream.next().await {
+        raid_handler.push(item);
     }
 
     Ok(())

@@ -4,6 +4,7 @@ mod updater;
 
 use crate::error::Result;
 pub use crate::image_hash::phash::ImageHash;
+pub use crate::image_hash::updater::Updater;
 
 use async_trait::async_trait;
 use http::Uri;
