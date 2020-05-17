@@ -1,5 +1,6 @@
 mod log;
 
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use futures::stream::StreamExt;
@@ -34,11 +35,23 @@ struct Opt {
     access_token: String,
     #[structopt(env = "ACCESS_TOKEN_SECRET", hide_env_values = true)]
     access_token_secret: String,
+
+    #[structopt(
+        long = "bind",
+        short = "b",
+        env = "BIND_IP",
+        default_value = "127.0.0.1"
+    )]
+    bind_ip: String,
+    #[structopt(long = "port", short = "p", env = "PORT", default_value = "8080")]
+    port: u16,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::from_args();
+
+    let bind_addr: SocketAddr = format!("{}:{}", opt.bind_ip, opt.port).parse()?;
 
     let token = twitter::Token::new(
         opt.consumer_key,
@@ -64,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(hash_updater.run());
 
     let (mut tweet_stream, worker) = twitter::connect_with_retries(
-        log,
+        log.clone(),
         client,
         token,
         opt.connection_retry_delay,
@@ -79,7 +92,8 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    slog::info!(log, "Starting HTTP server"; "port" => opt.port, "ip" => &opt.bind_ip);
+    warp::serve(routes).run(bind_addr).await;
 
     Ok(())
 }

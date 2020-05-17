@@ -19,4 +19,6 @@ pub enum Error {
     InvalidUri(#[from] http::uri::InvalidUri),
     #[error("stream was closed by receiver")]
     StreamClosed,
+    #[error("invalid bind address: {0}")]
+    BindPort(#[from] std::net::AddrParseError),
 }
