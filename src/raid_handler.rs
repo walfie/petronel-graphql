@@ -93,7 +93,7 @@ pub struct RaidHandlerInner {
 }
 
 impl RaidHandlerInner {
-    // TODO: Initialize with existing bosses
+    // TODO: Initialize with existing bosses, and handle Medusa override
     fn new(capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(capacity);
 
@@ -130,7 +130,7 @@ impl RaidHandlerInner {
         }
     }
 
-    pub fn get_history(&self, boss_name: BossName) -> Vec<Arc<Raid>> {
+    pub fn history(&self, boss_name: BossName) -> Vec<Arc<Raid>> {
         let key = self.boss_key(boss_name);
         if let Some(guard) = self.raid_history.get(&key) {
             guard.value().read().iter().cloned().collect::<Vec<_>>()
@@ -328,13 +328,13 @@ mod test {
             image_url: None,
         };
 
-        assert!(handler.get_history(BOSS_NAME_JA.into()).is_empty());
-        assert!(handler.get_history(BOSS_NAME_EN.into()).is_empty());
+        assert!(handler.history(BOSS_NAME_JA.into()).is_empty());
+        assert!(handler.history(BOSS_NAME_EN.into()).is_empty());
         assert!(handler.bosses().is_empty());
 
         handler.push(raid1.clone());
         assert_eq!(
-            handler.get_history(BOSS_NAME_JA.into()),
+            handler.history(BOSS_NAME_JA.into()),
             vec![Arc::new(raid1.clone())]
         );
         assert_eq!(handler.bosses(), vec![Arc::new(Boss::from(&raid1))]);
@@ -349,7 +349,7 @@ mod test {
         // Items should be returned latest first
         handler.push(raid2.clone());
         assert_eq!(
-            handler.get_history(BOSS_NAME_JA.into()),
+            handler.history(BOSS_NAME_JA.into()),
             vec![Arc::new(raid2.clone()), Arc::new(raid1.clone())]
         );
         assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid2.clone()));
@@ -358,7 +358,7 @@ mod test {
         let raid3 = next(&raid2, Japanese);
         handler.push(raid3.clone());
         assert_eq!(
-            handler.get_history(BOSS_NAME_JA.into()),
+            handler.history(BOSS_NAME_JA.into()),
             vec![Arc::new(raid3.clone()), Arc::new(raid2.clone())]
         );
         assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid3.clone()));
@@ -367,7 +367,7 @@ mod test {
         let raid4 = next(&raid3, English);
         handler.push(raid4.clone());
         assert_eq!(
-            handler.get_history(BOSS_NAME_EN.into()),
+            handler.history(BOSS_NAME_EN.into()),
             vec![Arc::new(raid4.clone())]
         );
         assert_eq!(subscriber_en.next().await.unwrap(), Arc::new(raid4.clone()));
@@ -393,11 +393,11 @@ mod test {
             ..Boss::from(&raid4)
         });
         assert_eq!(
-            handler.get_history(BOSS_NAME_EN.into()),
+            handler.history(BOSS_NAME_EN.into()),
             vec![Arc::new(raid4.clone()), Arc::new(raid3.clone())]
         );
         assert_eq!(
-            handler.get_history(BOSS_NAME_JA.into()),
+            handler.history(BOSS_NAME_JA.into()),
             vec![Arc::new(raid4.clone()), Arc::new(raid3.clone())]
         );
 

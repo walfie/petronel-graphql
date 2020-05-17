@@ -72,9 +72,14 @@ async fn main() -> anyhow::Result<()> {
     );
     tokio::spawn(worker);
 
-    while let Some(item) = tweet_stream.next().await {
-        raid_handler.push(item);
-    }
+    let routes = petronel_graphql::graphql::routes(raid_handler.clone());
+    tokio::spawn(async move {
+        while let Some(item) = tweet_stream.next().await {
+            raid_handler.push(item);
+        }
+    });
+
+    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 
     Ok(())
 }

@@ -1,4 +1,5 @@
 pub mod error;
+pub mod graphql;
 pub mod image_hash;
 pub mod model;
 mod raid_handler;

@@ -60,6 +60,10 @@ impl LangString {
         }
     }
 
+    pub fn default(&self) -> Option<&CachedString> {
+        self.ja.as_ref().or_else(|| self.en.as_ref())
+    }
+
     pub fn set(&mut self, lang: Language, value: Option<CachedString>) {
         match lang {
             Language::English => self.en = value,
