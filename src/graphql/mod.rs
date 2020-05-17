@@ -1,4 +1,4 @@
-mod model;
+mod schema;
 
 use crate::raid_handler::RaidHandler;
 use async_graphql::http::GQLResponse;
@@ -11,7 +11,7 @@ use warp::{http::Response, Filter, Rejection, Reply};
 pub fn routes(
     handler: RaidHandler,
 ) -> impl Filter<Extract = impl warp::Reply, Error = Infallible> + Clone {
-    let schema = Schema::build(model::QueryRoot, EmptyMutation, EmptySubscription)
+    let schema = Schema::build(schema::QueryRoot, EmptyMutation, EmptySubscription)
         .data(handler)
         .finish();
 
