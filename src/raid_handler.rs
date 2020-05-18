@@ -93,7 +93,12 @@ pub struct RaidHandlerInner {
 }
 
 impl RaidHandlerInner {
-    // TODO: Initialize with existing bosses, and handle Medusa override
+    // TODO:
+    // * Initialize with existing bosses, persistence
+    // * Manual translation override for Lvl 120 Medusa
+    // * Cleanup of bosses with no subscribers
+    // * Split capacity into separate values for history and stream backlog
+    // * Prometheus metrics
     fn new(capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(capacity);
 

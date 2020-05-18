@@ -20,8 +20,7 @@
       wsUrl: wsPrefix + window.location.host + "/graphql",
       wsProtocols: ["graphql-ws"],
     });
-    const props = { fetcher };
-    GraphiQLExplorerWs.render(props, document.getElementById("root"));
+    GraphiQLExplorerWs.render({ fetcher }, document.getElementById("root"));
   </script>
 </body>
 </html>
