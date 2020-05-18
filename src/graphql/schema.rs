@@ -5,6 +5,24 @@ use crate::RaidHandler;
 
 use async_graphql as gql;
 use async_graphql::Context;
+use futures::stream::Stream;
+
+pub struct SubscriptionRoot;
+
+#[gql::Subscription]
+impl SubscriptionRoot {
+    async fn bosses(&self, ctx: &Context<'_>) -> impl Stream<Item = Arc<Boss>> {
+        ctx.data::<RaidHandler>().subscribe_boss_updates()
+    }
+
+    async fn tweets(
+        &self,
+        ctx: &Context<'_>,
+        #[arg(name = "bossName")] boss_name: String,
+    ) -> impl Stream<Item = Arc<Raid>> {
+        ctx.data::<RaidHandler>().subscribe(boss_name.into())
+    }
+}
 
 pub struct QueryRoot;
 
