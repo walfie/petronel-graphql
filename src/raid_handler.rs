@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::model::{Boss, BossName, CachedString, ImageHash, Language, Raid};
+use crate::model::{Boss, BossName, CachedString, DateTime, ImageHash, Language, Raid};
 
 use circular_queue::CircularQueue;
 use dashmap::DashMap;
@@ -122,6 +122,12 @@ impl RaidHandlerInner {
             self.raid_broadcast.insert(key, tx);
             rx
         }
+    }
+
+    pub fn retain(&self, last_seen_after: DateTime) {
+        self.bosses
+            .retain(|_k, v| v.last_seen_at.as_datetime() > last_seen_after);
+        self.raid_broadcast.retain(|_k, v| v.receiver_count() > 0);
     }
 
     pub fn subscribe_boss_updates(&self) -> impl Stream<Item = Arc<Boss>> {

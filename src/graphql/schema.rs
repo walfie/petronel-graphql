@@ -31,6 +31,10 @@ impl QueryRoot {
     async fn bosses(&self, ctx: &Context<'_>) -> Vec<Arc<Boss>> {
         ctx.data::<RaidHandler>().bosses()
     }
+
+    async fn boss(&self, ctx: &Context<'_>, name: String) -> Option<Arc<Boss>> {
+        ctx.data::<RaidHandler>().boss(name.into())
+    }
 }
 
 #[gql::Object]
@@ -99,6 +103,7 @@ impl Raid {
         self.text.as_deref()
     }
 
+    // TODO: Add separate field for timestamp as milliseconds
     /// Tweet creation date
     #[field(name = "createdAt")]
     async fn created_at(&self) -> DateTime {

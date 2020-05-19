@@ -28,6 +28,8 @@ pub struct Raid {
     pub id: RaidId,
     pub tweet_id: TweetId,
     pub user_name: String,
+    // TODO: Strip prefix "https://pbs.twimg.com/profile_images/" to reduce size of messages.
+    // Include the full URL as a separate graphql field if requested.
     pub user_image: Option<String>,
     pub boss_name: BossName,
     pub created_at: DateTime,

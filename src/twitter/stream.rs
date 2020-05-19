@@ -81,6 +81,7 @@ where
                     match tokio::time::timeout(timeout, stream.next()).await {
                         Err(_) => {
                             slog::warn!(log, "Twitter stream timed out"; "duration" => ?timeout);
+                            break;
                         }
                         Ok(Some(Ok(msg))) => {
                             if let Err(_) = tx.send(msg) {
