@@ -72,6 +72,8 @@ where
     let (tx, rx) = mpsc::unbounded_channel();
 
     let worker = async move {
+        let mut retry_count = 0;
+
         // Loop per connection attempt
         loop {
             use twitter_stream::Error::Http;
@@ -103,8 +105,14 @@ where
                     slog::warn!(log, "Twitter HTTP error"; "statusCode" => status.as_u16());
                 }
                 Err(Http(status)) => {
-                    slog::error!(log, "Non-retryable Twitter HTTP error code"; "error" => %status);
-                    return Error::Http(status);
+                    // Sometimes a 401 can be returned even on valid credentials. If this is our
+                    // first attempt, fail immediately. Otherwise, if we've successfully connected
+                    // before, retry.
+                    if retry_count == 0 {
+                        slog::error!(log, "Non-retryable Twitter HTTP error code"; "error" => %status);
+                        return Error::Http(status);
+                    }
+                    slog::warn!(log, "Twitter HTTP error code"; "error" => %status);
                 }
                 Err(e) => {
                     slog::warn!(log, "Twitter stream connection error"; "error" => %e);
@@ -112,6 +120,7 @@ where
             };
 
             tokio::time::delay_for(retry_delay).await;
+            retry_count += 1;
         }
     };
 
