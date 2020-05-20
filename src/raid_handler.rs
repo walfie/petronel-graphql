@@ -92,6 +92,233 @@ pub struct RaidHandlerInner {
     capacity: usize,
 }
 
+#[derive(Debug)]
+pub struct BossEntry {
+    boss: Boss,
+    history: RwLock<CircularQueue<Arc<Raid>>>,
+    broadcast: broadcast::Sender<Arc<Raid>>,
+}
+
+impl Clone for BossEntry {
+    fn clone(&self) -> Self {
+        let boss = self.boss.clone();
+
+        let history = RwLock::new(self.history.read().clone());
+
+        BossEntry {
+            boss,
+            history,
+            broadcast: self.broadcast.clone(),
+        }
+    }
+}
+
+pub struct RaidHandlerInner2 {
+    bosses: DashMap<CachedString, Arc<BossEntry>>,
+    waiting: DashMap<CachedString, broadcast::Sender<Arc<Raid>>>,
+    boss_broadcast: broadcast::Sender<Arc<BossEntry>>,
+    history_size: usize,
+    broadcast_capacity: usize,
+}
+
+impl RaidHandlerInner2 {
+    // TODO:
+    // * Initialize with existing bosses, persistence
+    // * Manual translation override for Lvl 120 Medusa
+    // * Cleanup of bosses with no subscribers
+    // * Split capacity into separate values for history and stream backlog
+    // * Prometheus metrics
+    fn new(history_size: usize, broadcast_capacity: usize) -> Self {
+        let (tx, _) = broadcast::channel(broadcast_capacity);
+
+        Self {
+            bosses: DashMap::new(),
+            waiting: DashMap::new(),
+            boss_broadcast: tx,
+            history_size,
+            broadcast_capacity,
+        }
+    }
+
+    fn new_entry(&self, boss: Boss) -> BossEntry {
+        let (tx, _) = broadcast::channel(self.broadcast_capacity);
+        BossEntry {
+            boss,
+            history: RwLock::new(CircularQueue::with_capacity(self.history_size)),
+            broadcast: tx,
+        }
+    }
+
+    fn subscribe(&self, boss_name: BossName) -> broadcast::Receiver<Arc<Raid>> {
+        if let Some(guard) = self.bosses.get(&boss_name) {
+            guard.value().broadcast.subscribe()
+        } else if let Some(guard) = self.waiting.get(&boss_name) {
+            guard.value().subscribe()
+        } else {
+            let (tx, rx) = broadcast::channel(self.broadcast_capacity);
+            self.waiting.insert(boss_name, tx);
+            rx
+        }
+    }
+
+    pub fn retain(&self, last_seen_after: DateTime) {
+        self.bosses
+            .retain(|_k, v| v.boss.last_seen_at.as_datetime() > last_seen_after);
+        self.waiting.retain(|_k, v| v.receiver_count() > 0);
+    }
+
+    pub fn subscribe_boss_updates(&self) -> impl Stream<Item = Arc<BossEntry>> {
+        self.boss_broadcast.subscribe().filter_map(Result::ok)
+    }
+
+    pub fn history(&self, boss_name: BossName) -> Vec<Arc<Raid>> {
+        if let Some(guard) = self.bosses.get(&boss_name) {
+            guard
+                .value()
+                .history
+                .read()
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn boss(&self, name: BossName) -> Option<Arc<BossEntry>> {
+        self.bosses.get(&name).map(|guard| guard.value().clone())
+    }
+
+    pub fn bosses(&self) -> Vec<Arc<BossEntry>> {
+        // TODO: Get a cached list, sorted by boss level
+        self.bosses
+            .iter()
+            .map(|guard| guard.value().clone())
+            .collect::<Vec<_>>()
+    }
+
+    pub fn update_image_hash(&self, boss_name: BossName, image_hash: ImageHash) {
+        let guard = match self.bosses.get(&boss_name) {
+            Some(g) => g,
+            None => return,
+        };
+        let boss_entry = guard.value();
+
+        let this_boss = &boss_entry.boss;
+
+        if this_boss.image_hash == Some(image_hash) {
+            return; // Do nothing, it's already set
+        }
+
+        let is_japanese = this_boss.name.ja.is_some();
+
+        let matching_entry_opt = self.bosses.iter().find(|item| {
+            let value = item.value();
+            let other_boss = &value.boss;
+
+            other_boss.image_hash == Some(image_hash)
+                && other_boss.level == this_boss.level
+                && other_boss.name != this_boss.name
+        });
+
+        if let Some(matching_entry) = matching_entry_opt {
+            let other_entry = matching_entry.value();
+
+            // Merge the two entries, keeping values from the Japanese one
+            let (entry_to_keep, entry_to_discard) = if is_japanese {
+                (boss_entry, other_entry)
+            } else {
+                (other_entry, boss_entry)
+            };
+
+            let mut merged_boss = Boss::clone(&entry_to_keep.boss);
+            merged_boss.name = entry_to_keep.boss.name.merge(&entry_to_discard.boss.name);
+            merged_boss.image = entry_to_keep.boss.image.merge(&entry_to_discard.boss.image);
+            merged_boss.last_seen_at = this_boss.last_seen_at.clone();
+
+            let mut new_history = CircularQueue::with_capacity(self.history_size);
+            let mut combined_history = entry_to_discard
+                .history
+                .read()
+                .asc_iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            combined_history.extend(entry_to_keep.history.read().asc_iter().cloned());
+            combined_history.sort_by_key(|raid| raid.created_at);
+            combined_history
+                .drain(..)
+                .for_each(|raid| new_history.push(raid));
+
+            let keys = [merged_boss.name.ja.clone(), merged_boss.name.en.clone()];
+
+            let new_entry = Arc::new(BossEntry {
+                boss: merged_boss,
+                history: RwLock::new(new_history),
+                broadcast: entry_to_keep.broadcast.clone(),
+            });
+
+            for key in keys.iter() {
+                if let Some(key) = key {
+                    self.bosses.update(key, |_, _| new_entry.clone());
+                    self.waiting.remove(key);
+                }
+            }
+
+            let _ = self.boss_broadcast.send(new_entry);
+        } else {
+            // Update the existing entry with a new hash
+            self.bosses.update(&boss_name, |_, v| {
+                let mut new_entry = BossEntry::clone(v);
+                new_entry.boss.image_hash = Some(image_hash);
+
+                Arc::new(new_entry)
+            });
+        }
+    }
+
+    pub fn push(&self, raid: Raid) {
+        if let Some(guard) = self.bosses.get(&raid.boss_name) {
+            let entry = guard.value();
+
+            entry.boss.last_seen_at.replace(&raid.created_at);
+
+            let raid = Arc::new(raid);
+
+            // Broadcast the raid to all listeners of this boss and update history
+            entry.broadcast.send(raid.clone());
+            entry.history.write().push(raid.clone());
+
+            // If the incoming raid has an image URL but the existing boss doesn't, update the image
+            if entry.boss.image.get(raid.language).is_none() && raid.image_url.is_some() {
+                // Update the existing entry with a new hash
+                let mut new_entry = BossEntry::clone(entry);
+                new_entry
+                    .boss
+                    .image
+                    .set(raid.language, raid.image_url.clone());
+                let new_entry = Arc::new(new_entry);
+
+                // TODO: Update multiple keys
+                self.bosses
+                    .update(&raid.boss_name, |_, _| new_entry.clone());
+                self.boss_broadcast.send(new_entry);
+            }
+        } else {
+            let boss = Boss::from(&raid);
+            let entry = self.new_entry(boss);
+
+            let raid = Arc::new(raid);
+            entry.broadcast.send(raid.clone());
+            entry.history.write().push(raid.clone());
+
+            let entry = Arc::new(entry);
+            let _ = self.boss_broadcast.send(entry.clone());
+            self.bosses.insert(raid.boss_name.clone(), entry);
+            self.waiting.remove(&raid.boss_name);
+        }
+    }
+}
+
 impl RaidHandlerInner {
     // TODO:
     // * Initialize with existing bosses, persistence
