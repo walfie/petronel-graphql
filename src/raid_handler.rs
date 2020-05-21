@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use std::hash::Hash;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 
 use crate::model::{Boss, BossName, CachedString, DateTime, ImageHash, LangString, Language, Raid};
@@ -127,7 +127,7 @@ impl BossEntry {
 
 pub struct RaidHandlerInner2 {
     bosses: Bosses,
-    boss_broadcast: broadcast::Sender<Arc<BossEntry>>,
+    boss_broadcast: broadcast::Sender<Weak<BossEntry>>,
     history_size: usize,
     broadcast_capacity: usize,
 }
@@ -256,7 +256,9 @@ impl RaidHandlerInner2 {
     }
 
     pub fn subscribe_boss_updates(&self) -> impl Stream<Item = Arc<BossEntry>> {
-        self.boss_broadcast.subscribe().filter_map(Result::ok)
+        self.boss_broadcast
+            .subscribe()
+            .filter_map(|entry| entry.ok().and_then(|w| w.upgrade()))
     }
 
     pub fn boss(&self, name: BossName) -> Option<Arc<BossEntry>> {
@@ -320,8 +322,6 @@ impl RaidHandlerInner2 {
                 .drain(..)
                 .for_each(|raid| new_history.push(raid));
 
-            let keys = [merged_boss.name.ja.clone(), merged_boss.name.en.clone()];
-
             let new_entry = Arc::new(BossEntry {
                 boss: merged_boss,
                 history: RwLock::new(new_history),
@@ -330,7 +330,7 @@ impl RaidHandlerInner2 {
 
             self.bosses.insert(&new_entry);
 
-            let _ = self.boss_broadcast.send(new_entry);
+            let _ = self.boss_broadcast.send(Arc::downgrade(&new_entry));
         } else {
             let mut new_entry = BossEntry::clone(boss_entry);
             new_entry.boss.image_hash = Some(image_hash);
@@ -347,7 +347,7 @@ impl RaidHandlerInner2 {
             let raid = Arc::new(raid);
 
             // Broadcast the raid to all listeners of this boss and update history
-            entry.broadcast.send(raid.clone());
+            let _ = entry.broadcast.send(raid.clone());
             entry.history.write().push(raid.clone());
 
             // If the incoming raid has an image URL but the existing boss doesn't, update the image
@@ -361,7 +361,7 @@ impl RaidHandlerInner2 {
                 let new_entry = Arc::new(new_entry);
 
                 self.bosses.insert(&new_entry);
-                let _ = self.boss_broadcast.send(new_entry);
+                let _ = self.boss_broadcast.send(Arc::downgrade(&new_entry));
             }
         } else {
             let boss = Boss::from(&raid);
@@ -372,7 +372,7 @@ impl RaidHandlerInner2 {
             entry.history.write().push(raid.clone());
 
             let entry = Arc::new(entry);
-            let _ = self.boss_broadcast.send(entry.clone());
+            let _ = self.boss_broadcast.send(Arc::downgrade(&entry));
             self.bosses.insert(&entry);
         }
     }
