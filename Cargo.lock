@@ -1444,6 +1444,7 @@ name = "petronel-graphql"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "async-graphql",
  "async-graphql-warp",
  "async-trait",

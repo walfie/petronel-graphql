@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.28"
+arc-swap = "0.4.6"
 async-graphql = "1.12.10"
 async-graphql-warp = "1.4.10"
 async-trait = "0.1.31"

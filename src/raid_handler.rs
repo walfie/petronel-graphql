@@ -1,13 +1,15 @@
 use std::borrow::Borrow;
+use std::hash::Hash;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::model::{Boss, BossName, CachedString, DateTime, ImageHash, Language, Raid};
+use crate::model::{Boss, BossName, CachedString, DateTime, ImageHash, LangString, Language, Raid};
 
+use arc_swap::ArcSwap;
 use circular_queue::CircularQueue;
-use dashmap::DashMap;
+use dashmap::{DashMap, ElementGuard};
 use futures::stream::Stream;
 use parking_lot::RwLock;
 use tokio::stream::StreamExt;
@@ -113,27 +115,122 @@ impl Clone for BossEntry {
     }
 }
 
+impl BossEntry {
+    fn boss(&self) -> &Boss {
+        &self.boss
+    }
+
+    fn history(&self) -> &RwLock<CircularQueue<Arc<Raid>>> {
+        &self.history
+    }
+}
+
 pub struct RaidHandlerInner2 {
-    bosses: DashMap<CachedString, Arc<BossEntry>>,
-    waiting: DashMap<CachedString, broadcast::Sender<Arc<Raid>>>,
+    bosses: Bosses,
     boss_broadcast: broadcast::Sender<Arc<BossEntry>>,
     history_size: usize,
     broadcast_capacity: usize,
+}
+
+struct Bosses {
+    map: DashMap<CachedString, Arc<BossEntry>>,
+    // Bosses sorted by level, then name
+    vec: ArcSwap<Vec<Arc<BossEntry>>>,
+    // Bosses that don't exist yet, but are subscribed to
+    waiting: DashMap<CachedString, broadcast::Sender<Arc<Raid>>>,
+}
+
+impl Bosses {
+    // TODO: Initialize with bosses
+    fn new() -> Self {
+        Self {
+            map: DashMap::new(),
+            vec: ArcSwap::from_pointee(Vec::new()),
+            waiting: DashMap::new(),
+        }
+    }
+
+    fn get<K>(&self, name: &K) -> Option<ElementGuard<CachedString, Arc<BossEntry>>>
+    where
+        CachedString: Borrow<K>,
+        K: Eq + Hash,
+    {
+        self.map.get(name)
+    }
+
+    fn update_vec(&self) {
+        let mut vec = self
+            .map
+            .iter()
+            .map(|guard| guard.value().clone())
+            .collect::<Vec<_>>();
+
+        vec.sort_by_key(|entry| (entry.boss.level, entry.boss.name.default().cloned()));
+        vec.dedup_by(|a, b| Arc::ptr_eq(a, b));
+
+        self.vec.store(Arc::new(vec));
+    }
+
+    fn retain(&self, predicate: impl FnMut(&CachedString, &Arc<BossEntry>) -> bool) {
+        let len = self.map.len();
+        self.map.retain(predicate);
+        if self.map.len() != len {
+            self.update_vec();
+        }
+
+        self.waiting.retain(|_k, v| v.receiver_count() > 0);
+    }
+
+    fn find(
+        &self,
+        predicate: impl FnMut(&ElementGuard<CachedString, Arc<BossEntry>>) -> bool,
+    ) -> Option<ElementGuard<CachedString, Arc<BossEntry>>> {
+        self.map.iter().find(predicate)
+    }
+
+    fn as_vec(&self) -> &ArcSwap<Vec<Arc<BossEntry>>> {
+        &self.vec
+    }
+
+    fn insert(&self, entry: &Arc<BossEntry>) {
+        let LangString { ja, en } = &entry.boss.name;
+
+        // TODO: Possibly also update with ID
+        for key in [ja, en].iter().map(|lang| lang.as_ref()).flatten() {
+            self.map.insert(key.clone(), entry.clone());
+            self.waiting.remove(&key);
+        }
+
+        self.update_vec();
+    }
+
+    fn subscribe<'a, K>(&self, key: &'a K) -> broadcast::Receiver<Arc<Raid>>
+    where
+        CachedString: Borrow<K> + From<&'a K>,
+        K: Eq + Hash,
+    {
+        if let Some(guard) = self.map.get(key) {
+            guard.value().broadcast.subscribe()
+        } else if let Some(guard) = self.waiting.get(key) {
+            guard.value().subscribe()
+        } else {
+            let (tx, rx) = broadcast::channel(0);
+            self.waiting.insert(key.into(), tx);
+            rx
+        }
+    }
 }
 
 impl RaidHandlerInner2 {
     // TODO:
     // * Initialize with existing bosses, persistence
     // * Manual translation override for Lvl 120 Medusa
-    // * Cleanup of bosses with no subscribers
-    // * Split capacity into separate values for history and stream backlog
     // * Prometheus metrics
     fn new(history_size: usize, broadcast_capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(broadcast_capacity);
 
         Self {
-            bosses: DashMap::new(),
-            waiting: DashMap::new(),
+            bosses: Bosses::new(),
             boss_broadcast: tx,
             history_size,
             broadcast_capacity,
@@ -150,51 +247,25 @@ impl RaidHandlerInner2 {
     }
 
     fn subscribe(&self, boss_name: BossName) -> broadcast::Receiver<Arc<Raid>> {
-        if let Some(guard) = self.bosses.get(&boss_name) {
-            guard.value().broadcast.subscribe()
-        } else if let Some(guard) = self.waiting.get(&boss_name) {
-            guard.value().subscribe()
-        } else {
-            let (tx, rx) = broadcast::channel(self.broadcast_capacity);
-            self.waiting.insert(boss_name, tx);
-            rx
-        }
+        self.bosses.subscribe(&boss_name)
     }
 
     pub fn retain(&self, last_seen_after: DateTime) {
         self.bosses
             .retain(|_k, v| v.boss.last_seen_at.as_datetime() > last_seen_after);
-        self.waiting.retain(|_k, v| v.receiver_count() > 0);
     }
 
     pub fn subscribe_boss_updates(&self) -> impl Stream<Item = Arc<BossEntry>> {
         self.boss_broadcast.subscribe().filter_map(Result::ok)
     }
 
-    pub fn history(&self, boss_name: BossName) -> Vec<Arc<Raid>> {
-        if let Some(guard) = self.bosses.get(&boss_name) {
-            guard
-                .value()
-                .history
-                .read()
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        }
-    }
-
     pub fn boss(&self, name: BossName) -> Option<Arc<BossEntry>> {
         self.bosses.get(&name).map(|guard| guard.value().clone())
     }
 
-    pub fn bosses(&self) -> Vec<Arc<BossEntry>> {
-        // TODO: Get a cached list, sorted by boss level
-        self.bosses
-            .iter()
-            .map(|guard| guard.value().clone())
-            .collect::<Vec<_>>()
+    // TODO: Wrap the guard in a type
+    pub fn bosses(&self) -> arc_swap::Guard<'static, Arc<Vec<Arc<BossEntry>>>> {
+        self.bosses.as_vec().load()
     }
 
     pub fn update_image_hash(&self, boss_name: BossName, image_hash: ImageHash) {
@@ -206,13 +277,13 @@ impl RaidHandlerInner2 {
 
         let this_boss = &boss_entry.boss;
 
-        if this_boss.image_hash == Some(image_hash) {
+        if this_boss.image_hash.is_some() {
             return; // Do nothing, it's already set
         }
 
         let is_japanese = this_boss.name.ja.is_some();
 
-        let matching_entry_opt = self.bosses.iter().find(|item| {
+        let matching_entry_opt = self.bosses.find(|item| {
             let value = item.value();
             let other_boss = &value.boss;
 
@@ -257,22 +328,13 @@ impl RaidHandlerInner2 {
                 broadcast: entry_to_keep.broadcast.clone(),
             });
 
-            for key in keys.iter() {
-                if let Some(key) = key {
-                    self.bosses.update(key, |_, _| new_entry.clone());
-                    self.waiting.remove(key);
-                }
-            }
+            self.bosses.insert(&new_entry);
 
             let _ = self.boss_broadcast.send(new_entry);
         } else {
-            // Update the existing entry with a new hash
-            self.bosses.update(&boss_name, |_, v| {
-                let mut new_entry = BossEntry::clone(v);
-                new_entry.boss.image_hash = Some(image_hash);
-
-                Arc::new(new_entry)
-            });
+            let mut new_entry = BossEntry::clone(boss_entry);
+            new_entry.boss.image_hash = Some(image_hash);
+            self.bosses.insert(&Arc::new(new_entry));
         }
     }
 
@@ -298,23 +360,20 @@ impl RaidHandlerInner2 {
                     .set(raid.language, raid.image_url.clone());
                 let new_entry = Arc::new(new_entry);
 
-                // TODO: Update multiple keys
-                self.bosses
-                    .update(&raid.boss_name, |_, _| new_entry.clone());
-                self.boss_broadcast.send(new_entry);
+                self.bosses.insert(&new_entry);
+                let _ = self.boss_broadcast.send(new_entry);
             }
         } else {
             let boss = Boss::from(&raid);
             let entry = self.new_entry(boss);
 
             let raid = Arc::new(raid);
-            entry.broadcast.send(raid.clone());
+            let _ = entry.broadcast.send(raid.clone());
             entry.history.write().push(raid.clone());
 
             let entry = Arc::new(entry);
             let _ = self.boss_broadcast.send(entry.clone());
-            self.bosses.insert(raid.boss_name.clone(), entry);
-            self.waiting.remove(&raid.boss_name);
+            self.bosses.insert(&entry);
         }
     }
 }
