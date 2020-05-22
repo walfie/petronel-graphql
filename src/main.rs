@@ -1,60 +1,16 @@
 mod log;
+mod opts;
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use futures::stream::StreamExt;
 use petronel_graphql::image_hash::HyperImageHasher;
 use petronel_graphql::{image_hash, twitter, RaidHandler};
 use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
-struct Opt {
-    #[structopt(long = "json-logs", env = "JSON_LOGS")]
-    json_logs: bool,
-    #[structopt(
-        long = "connection-retry-delay",
-        env = "CONNECTION_RETRY_DELAY",
-        default_value = "10s",
-        parse(try_from_str = parse_duration)
-    )]
-    connection_retry_delay: Duration,
-    #[structopt(
-        long = "connection-timeout",
-        env = "CONNECTION_TIMEOUT",
-        default_value = "60s",
-        parse(try_from_str = parse_duration)
-    )]
-    connection_timeout: Duration,
-
-    #[structopt(env = "CONSUMER_KEY", hide_env_values = true)]
-    consumer_key: String,
-    #[structopt(env = "CONSUMER_SECRET", hide_env_values = true)]
-    consumer_secret: String,
-    #[structopt(env = "ACCESS_TOKEN", hide_env_values = true)]
-    access_token: String,
-    #[structopt(env = "ACCESS_TOKEN_SECRET", hide_env_values = true)]
-    access_token_secret: String,
-
-    #[structopt(env = "RAID_HISTORY_SIZE", default_value = "10")]
-    raid_history_size: usize,
-    #[structopt(env = "BROADCAST_BUFFER_SIZE", default_value = "10")]
-    broadcast_capacity: usize,
-
-    #[structopt(
-        long = "bind",
-        short = "b",
-        env = "BIND_IP",
-        default_value = "127.0.0.1"
-    )]
-    bind_ip: String,
-    #[structopt(long = "port", short = "p", env = "PORT", default_value = "8080")]
-    port: u16,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let opt = Opt::from_args();
+    let opt = opts::Options::from_args();
 
     let bind_addr: SocketAddr = format!("{}:{}", opt.bind_ip, opt.port).parse()?;
 
@@ -100,24 +56,4 @@ async fn main() -> anyhow::Result<()> {
     warp::serve(routes).run(bind_addr).await;
 
     Ok(())
-}
-
-fn parse_duration(s: &str) -> anyhow::Result<Duration> {
-    fn trim<F>(s: &str, suffix: &str, f: F) -> Option<Duration>
-    where
-        F: Fn(u64) -> Duration,
-    {
-        if s.ends_with(suffix) {
-            s.trim_end_matches(suffix).parse::<u64>().map(f).ok()
-        } else {
-            None
-        }
-    }
-
-    trim(s, "ms", Duration::from_millis)
-        .or_else(|| trim(s, "s", Duration::from_secs))
-        .or_else(|| trim(s, "m", |m| Duration::from_secs(m * 60)))
-        .or_else(|| trim(s, "h", |h| Duration::from_secs(h * 60 * 60)))
-        .or_else(|| trim(s, "d", |d| Duration::from_secs(d * 60 * 60 * 24)))
-        .ok_or_else(|| anyhow::Error::msg("failed to parse duration"))
 }
