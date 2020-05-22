@@ -59,7 +59,6 @@ async fn main() -> anyhow::Result<()> {
         opt.connection_retry_delay,
         opt.connection_timeout,
     );
-    tokio::spawn(worker);
 
     let routes = petronel_graphql::graphql::routes(raid_handler.clone());
     tokio::spawn(async move {
@@ -69,7 +68,19 @@ async fn main() -> anyhow::Result<()> {
     });
 
     slog::info!(log, "Starting HTTP server"; "port" => opt.port, "ip" => &opt.bind_ip);
-    warp::serve(routes).run(bind_addr).await;
+    let server = warp::serve(routes).try_bind(bind_addr);
 
-    Ok(())
+    tokio::select! {
+        _ = worker => {
+            slog::error!(log, "Disconnected from Twitter stream");
+        }
+        _ = server => {
+            slog::error!(
+                log, "Could not bind to the requested address";
+                "port" => opt.port, "ip" => &opt.bind_ip
+            );
+        }
+    };
+
+    anyhow::bail!("could not start");
 }
