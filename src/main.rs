@@ -3,6 +3,7 @@ mod opts;
 
 use std::net::SocketAddr;
 
+use chrono::Utc;
 use futures::stream::StreamExt;
 use petronel_graphql::image_hash::HyperImageHasher;
 use petronel_graphql::{image_hash, twitter, RaidHandler};
@@ -28,6 +29,21 @@ async fn main() -> anyhow::Result<()> {
 
     let concurrency = 5; // TODO: configurable
     let raid_handler = RaidHandler::new(opt.raid_history_size, opt.broadcast_capacity);
+
+    // Cleanup task
+    tokio::spawn({
+        let max_age = chrono::Duration::from_std(opt.boss_max_age)?;
+        let raid_handler = raid_handler.clone();
+        let mut interval = tokio::time::interval(opt.cleanup_interval);
+        async move {
+            loop {
+                interval.tick().await;
+                raid_handler.retain(Utc::now() - max_age);
+            }
+        }
+    });
+
+    // Fetch boss images and calculate image hashes
     let hash_updater = image_hash::Updater::new(
         log.clone(),
         HyperImageHasher::new(client.clone()),

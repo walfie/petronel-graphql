@@ -120,6 +120,7 @@ where
             };
 
             tokio::time::delay_for(retry_delay).await;
+            slog::info!(log, "Reconnecting to Twitter stream");
             retry_count += 1;
         }
     };
