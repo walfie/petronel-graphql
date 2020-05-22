@@ -25,14 +25,14 @@ impl Borrow<str> for BossKey {
 }
 
 #[derive(Clone, Debug)]
-pub struct RaidHandler(Arc<RaidHandlerInner>);
+pub struct RaidHandler(Arc<RaidHandlerInner2>);
 
 pin_project_lite::pin_project! {
     pub struct Subscription {
         #[pin]
         rx: broadcast::Receiver<Arc<Raid>>,
         boss_name: BossName,
-        handler: Arc<RaidHandlerInner>,
+        handler: Arc<RaidHandlerInner2>,
     }
 }
 
@@ -52,24 +52,24 @@ impl Stream for Subscription {
 
             // Attempt to resubscribe if the inner subscription ends
             // (e.g., if the stream is stopped due to being merged with another boss)
-            std::mem::replace(
-                &mut *this.rx,
-                this.handler.subscribe(this.boss_name.clone()),
-            );
+            std::mem::replace(&mut *this.rx, this.handler.subscribe(&this.boss_name));
         }
     }
 }
 
 impl RaidHandler {
-    pub fn new(capacity: usize) -> Self {
-        Self(Arc::new(RaidHandlerInner::new(capacity)))
+    pub fn new(history_size: usize, broadcast_capacity: usize) -> Self {
+        Self(Arc::new(RaidHandlerInner2::new(
+            history_size,
+            broadcast_capacity,
+        )))
     }
 
     pub fn subscribe(&self, boss_name: BossName) -> Subscription {
         let inner = self.0.clone();
 
         Subscription {
-            rx: inner.subscribe(boss_name.clone()),
+            rx: inner.subscribe(&boss_name),
             boss_name,
             handler: inner.clone(),
         }
@@ -77,7 +77,7 @@ impl RaidHandler {
 }
 
 impl Deref for RaidHandler {
-    type Target = RaidHandlerInner;
+    type Target = RaidHandlerInner2;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -116,45 +116,65 @@ impl Clone for BossEntry {
 }
 
 impl BossEntry {
-    fn boss(&self) -> &Boss {
+    #[inline]
+    pub fn boss(&self) -> &Boss {
         &self.boss
     }
 
-    fn history(&self) -> &RwLock<CircularQueue<Arc<Raid>>> {
+    // Ideally this would return a value that doesn't leak implementation details,
+    // but I can't figure out a great way to do it
+    pub fn history(&self) -> &RwLock<CircularQueue<Arc<Raid>>> {
         &self.history
+    }
+
+    fn for_each_key(&self, f: impl FnMut(&BossName) -> () + Copy) {
+        let LangString { ja, en } = &self.boss.name;
+        ja.iter().for_each(f);
+        en.iter().for_each(f);
     }
 }
 
+pub struct Bosses(arc_swap::Guard<'static, Arc<Vec<Arc<BossEntry>>>>);
+impl Deref for Bosses {
+    type Target = Vec<Arc<BossEntry>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Debug)]
 pub struct RaidHandlerInner2 {
-    bosses: Bosses,
+    bosses: BossMap,
     boss_broadcast: broadcast::Sender<Weak<BossEntry>>,
     history_size: usize,
     broadcast_capacity: usize,
 }
 
-struct Bosses {
+#[derive(Debug)]
+struct BossMap {
     map: DashMap<CachedString, Arc<BossEntry>>,
     // Bosses sorted by level, then name
     vec: ArcSwap<Vec<Arc<BossEntry>>>,
     // Bosses that don't exist yet, but are subscribed to
     waiting: DashMap<CachedString, broadcast::Sender<Arc<Raid>>>,
+    history_size: usize,
+    broadcast_capacity: usize,
 }
 
-impl Bosses {
+impl BossMap {
     // TODO: Initialize with bosses
-    fn new() -> Self {
+    fn new(history_size: usize, broadcast_capacity: usize) -> Self {
         Self {
             map: DashMap::new(),
             vec: ArcSwap::from_pointee(Vec::new()),
             waiting: DashMap::new(),
+            history_size,
+            broadcast_capacity,
         }
     }
 
-    fn get<K>(&self, name: &K) -> Option<ElementGuard<CachedString, Arc<BossEntry>>>
-    where
-        CachedString: Borrow<K>,
-        K: Eq + Hash,
-    {
+    fn get(&self, name: &CachedString) -> Option<ElementGuard<CachedString, Arc<BossEntry>>> {
         self.map.get(name)
     }
 
@@ -193,31 +213,48 @@ impl Bosses {
     }
 
     fn insert(&self, entry: &Arc<BossEntry>) {
-        let LangString { ja, en } = &entry.boss.name;
-
-        // TODO: Possibly also update with ID
-        for key in [ja, en].iter().map(|lang| lang.as_ref()).flatten() {
+        entry.for_each_key(|key| {
             self.map.insert(key.clone(), entry.clone());
             self.waiting.remove(&key);
-        }
+        });
 
         self.update_vec();
     }
 
-    fn subscribe<'a, K>(&self, key: &'a K) -> broadcast::Receiver<Arc<Raid>>
-    where
-        CachedString: Borrow<K> + From<&'a K>,
-        K: Eq + Hash,
-    {
+    fn subscribe(&self, key: &CachedString) -> broadcast::Receiver<Arc<Raid>> {
         if let Some(guard) = self.map.get(key) {
             guard.value().broadcast.subscribe()
         } else if let Some(guard) = self.waiting.get(key) {
             guard.value().subscribe()
         } else {
-            let (tx, rx) = broadcast::channel(0);
+            let (tx, rx) = broadcast::channel(1);
             self.waiting.insert(key.into(), tx);
             rx
         }
+    }
+
+    fn new_entry_from_raid(&self, raid: Raid) -> Arc<BossEntry> {
+        let boss = Boss::from(&raid);
+        let broadcast = if let Some(tx) = self.waiting.remove_take(&raid.boss_name) {
+            tx.value().clone()
+        } else {
+            let (tx, _) = broadcast::channel(self.broadcast_capacity);
+            tx
+        };
+
+        let entry = BossEntry {
+            boss,
+            history: RwLock::new(CircularQueue::with_capacity(self.history_size)),
+            broadcast,
+        };
+
+        let raid = Arc::new(raid);
+        let _ = entry.broadcast.send(raid.clone());
+        entry.history.write().push(raid.clone());
+
+        let entry = Arc::new(entry);
+        self.insert(&entry);
+        entry
     }
 }
 
@@ -230,24 +267,15 @@ impl RaidHandlerInner2 {
         let (tx, _) = broadcast::channel(broadcast_capacity);
 
         Self {
-            bosses: Bosses::new(),
+            bosses: BossMap::new(history_size, broadcast_capacity),
             boss_broadcast: tx,
             history_size,
             broadcast_capacity,
         }
     }
 
-    fn new_entry(&self, boss: Boss) -> BossEntry {
-        let (tx, _) = broadcast::channel(self.broadcast_capacity);
-        BossEntry {
-            boss,
-            history: RwLock::new(CircularQueue::with_capacity(self.history_size)),
-            broadcast: tx,
-        }
-    }
-
-    fn subscribe(&self, boss_name: BossName) -> broadcast::Receiver<Arc<Raid>> {
-        self.bosses.subscribe(&boss_name)
+    fn subscribe(&self, boss_name: &CachedString) -> broadcast::Receiver<Arc<Raid>> {
+        self.bosses.subscribe(boss_name)
     }
 
     pub fn retain(&self, last_seen_after: DateTime) {
@@ -261,17 +289,16 @@ impl RaidHandlerInner2 {
             .filter_map(|entry| entry.ok().and_then(|w| w.upgrade()))
     }
 
-    pub fn boss(&self, name: BossName) -> Option<Arc<BossEntry>> {
-        self.bosses.get(&name).map(|guard| guard.value().clone())
+    pub fn boss(&self, name: &CachedString) -> Option<Arc<BossEntry>> {
+        self.bosses.get(name).map(|guard| guard.value().clone())
     }
 
-    // TODO: Wrap the guard in a type
-    pub fn bosses(&self) -> arc_swap::Guard<'static, Arc<Vec<Arc<BossEntry>>>> {
-        self.bosses.as_vec().load()
+    pub fn bosses(&self) -> Bosses {
+        Bosses(self.bosses.as_vec().load())
     }
 
-    pub fn update_image_hash(&self, boss_name: BossName, image_hash: ImageHash) {
-        let guard = match self.bosses.get(&boss_name) {
+    pub fn update_image_hash(&self, boss_name: &BossName, image_hash: ImageHash) {
+        let guard = match self.bosses.get(boss_name) {
             Some(g) => g,
             None => return,
         };
@@ -307,7 +334,11 @@ impl RaidHandlerInner2 {
             let mut merged_boss = Boss::clone(&entry_to_keep.boss);
             merged_boss.name = entry_to_keep.boss.name.merge(&entry_to_discard.boss.name);
             merged_boss.image = entry_to_keep.boss.image.merge(&entry_to_discard.boss.image);
-            merged_boss.last_seen_at = this_boss.last_seen_at.clone();
+            merged_boss.image_hash = Some(image_hash);
+            merged_boss.last_seen_at = std::cmp::max(
+                entry_to_keep.boss.last_seen_at.clone(),
+                entry_to_discard.boss.last_seen_at.clone(),
+            );
 
             let mut new_history = CircularQueue::with_capacity(self.history_size);
             let mut combined_history = entry_to_discard
@@ -364,16 +395,8 @@ impl RaidHandlerInner2 {
                 let _ = self.boss_broadcast.send(Arc::downgrade(&new_entry));
             }
         } else {
-            let boss = Boss::from(&raid);
-            let entry = self.new_entry(boss);
-
-            let raid = Arc::new(raid);
-            let _ = entry.broadcast.send(raid.clone());
-            entry.history.write().push(raid.clone());
-
-            let entry = Arc::new(entry);
+            let entry = self.bosses.new_entry_from_raid(raid);
             let _ = self.boss_broadcast.send(Arc::downgrade(&entry));
-            self.bosses.insert(&entry);
         }
     }
 }
@@ -584,20 +607,37 @@ mod test {
     use chrono::offset::TimeZone;
     use chrono::Utc;
     use futures::stream::StreamExt;
+    use once_cell::sync::Lazy;
 
-    const BOSS_NAME_JA: &'static str = "Lv60 オオゾラッコ";
-    const BOSS_NAME_EN: &'static str = "Lvl 60 Ozorotter";
+    const BOSS_NAME_JA: Lazy<BossName> = Lazy::new(|| "Lv60 オオゾラッコ".into());
+    const BOSS_NAME_EN: Lazy<BossName> = Lazy::new(|| "Lvl 60 Ozorotter".into());
+
+    fn get_history(handler: &RaidHandler, boss_name: &BossName) -> Vec<Arc<Raid>> {
+        match handler.boss(boss_name) {
+            None => Vec::new(),
+            Some(entry) => entry.history().read().iter().cloned().collect(),
+        }
+    }
+
+    fn get_bosses(handler: &RaidHandler) -> Vec<Boss> {
+        handler
+            .bosses()
+            .iter()
+            .map(|entry| entry.boss.clone())
+            .collect()
+    }
 
     #[tokio::test]
-    async fn get_history() {
+    async fn scenario() {
         use Language::{English, Japanese};
 
-        let capacity = 2;
+        let history_size = 2;
+        let broadcast_capacity = 10;
 
-        let handler = RaidHandler::new(capacity);
+        let handler = RaidHandler::new(history_size, broadcast_capacity);
 
-        let mut subscriber_ja = handler.subscribe(BOSS_NAME_JA.into());
-        let mut subscriber_en = handler.subscribe(BOSS_NAME_EN.into());
+        let mut subscriber_ja = handler.subscribe(BOSS_NAME_JA.clone());
+        let mut subscriber_en = handler.subscribe(BOSS_NAME_EN.clone());
         let mut boss_subscriber = handler.subscribe_boss_updates();
 
         fn next(raid: &Raid, language: Language) -> Raid {
@@ -607,8 +647,8 @@ mod test {
             raid.created_at = raid.created_at + chrono::Duration::seconds(1);
             raid.language = language;
             raid.boss_name = match language {
-                Japanese => BOSS_NAME_JA.into(),
-                English => BOSS_NAME_EN.into(),
+                Japanese => BOSS_NAME_JA.clone(),
+                English => BOSS_NAME_EN.clone(),
             };
             raid
         }
@@ -618,27 +658,27 @@ mod test {
             tweet_id: 1,
             user_name: "walfieee".into(),
             user_image: None,
-            boss_name: BOSS_NAME_JA.into(),
+            boss_name: BOSS_NAME_JA.clone(),
             created_at: Utc.ymd(2020, 5, 20).and_hms(1, 2, 3),
             text: Some("Help".into()),
             language: Language::Japanese,
             image_url: None,
         };
 
-        assert!(handler.history(BOSS_NAME_JA.into()).is_empty());
-        assert!(handler.history(BOSS_NAME_EN.into()).is_empty());
+        assert!(handler.boss(&BOSS_NAME_JA).is_none());
+        assert!(handler.boss(&BOSS_NAME_EN).is_none());
         assert!(handler.bosses().is_empty());
 
         handler.push(raid1.clone());
-        assert_eq!(
-            handler.history(BOSS_NAME_JA.into()),
-            vec![Arc::new(raid1.clone())]
-        );
-        assert_eq!(handler.bosses(), vec![Arc::new(Boss::from(&raid1))]);
         assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid1.clone()));
         assert_eq!(
-            boss_subscriber.next().await.unwrap(),
-            Arc::new(Boss::from(&raid1))
+            get_history(&handler, &BOSS_NAME_JA),
+            vec![Arc::new(raid1.clone())]
+        );
+        assert_eq!(get_bosses(&handler), vec![Boss::from(&raid1)]);
+        assert_eq!(
+            boss_subscriber.next().await.unwrap().boss,
+            Boss::from(&raid1)
         );
 
         let raid2 = next(&raid1, Japanese);
@@ -646,7 +686,7 @@ mod test {
         // Items should be returned latest first
         handler.push(raid2.clone());
         assert_eq!(
-            handler.history(BOSS_NAME_JA.into()),
+            get_history(&handler, &BOSS_NAME_JA),
             vec![Arc::new(raid2.clone()), Arc::new(raid1.clone())]
         );
         assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid2.clone()));
@@ -655,7 +695,7 @@ mod test {
         let raid3 = next(&raid2, Japanese);
         handler.push(raid3.clone());
         assert_eq!(
-            handler.history(BOSS_NAME_JA.into()),
+            get_history(&handler, &BOSS_NAME_JA),
             vec![Arc::new(raid3.clone()), Arc::new(raid2.clone())]
         );
         assert_eq!(subscriber_ja.next().await.unwrap(), Arc::new(raid3.clone()));
@@ -663,24 +703,24 @@ mod test {
         // Push a raid from a boss with a different name
         let raid4 = next(&raid3, English);
         handler.push(raid4.clone());
-        assert_eq!(
-            handler.history(BOSS_NAME_EN.into()),
-            vec![Arc::new(raid4.clone())]
-        );
         assert_eq!(subscriber_en.next().await.unwrap(), Arc::new(raid4.clone()));
         assert_eq!(
-            boss_subscriber.next().await.unwrap(),
-            Arc::new(Boss::from(&raid4))
+            get_history(&handler, &BOSS_NAME_EN),
+            vec![Arc::new(raid4.clone())]
+        );
+        assert_eq!(
+            boss_subscriber.next().await.unwrap().boss,
+            Boss::from(&raid4)
         );
 
         // Merge the two bosses. The history should be merged, as well as the boss entries and broadcast.
-        handler.update_image_hash(BOSS_NAME_EN.into(), ImageHash(123));
-        handler.update_image_hash(BOSS_NAME_JA.into(), ImageHash(123));
+        handler.update_image_hash(&BOSS_NAME_EN, ImageHash(123));
+        handler.update_image_hash(&BOSS_NAME_JA, ImageHash(123));
 
-        let expected_boss = Arc::new(Boss {
+        let expected_boss = Boss {
             name: LangString {
-                en: Some(BOSS_NAME_EN.into()),
-                ja: Some(BOSS_NAME_JA.into()),
+                en: Some(BOSS_NAME_EN.clone()),
+                ja: Some(BOSS_NAME_JA.clone()),
             },
             image: LangString {
                 en: raid4.image_url.as_ref().cloned(),
@@ -688,23 +728,23 @@ mod test {
             },
             image_hash: Some(ImageHash(123)),
             ..Boss::from(&raid4)
-        });
+        };
         assert_eq!(
-            handler.history(BOSS_NAME_EN.into()),
+            get_history(&handler, &BOSS_NAME_EN),
             vec![Arc::new(raid4.clone()), Arc::new(raid3.clone())]
         );
         assert_eq!(
-            handler.history(BOSS_NAME_JA.into()),
+            get_history(&handler, &BOSS_NAME_JA),
             vec![Arc::new(raid4.clone()), Arc::new(raid3.clone())]
         );
 
-        assert_eq!(handler.boss(BOSS_NAME_EN.into()).unwrap(), expected_boss);
-        assert_eq!(handler.boss(BOSS_NAME_JA.into()).unwrap(), expected_boss);
-        assert_eq!(boss_subscriber.next().await.unwrap(), expected_boss);
+        assert_eq!(handler.boss(&BOSS_NAME_EN).unwrap().boss, expected_boss);
+        assert_eq!(handler.boss(&BOSS_NAME_JA).unwrap().boss, expected_boss);
+        assert_eq!(boss_subscriber.next().await.unwrap().boss, expected_boss);
 
         // The next raid should get sent to `en` and `ja` subscribers, including new ones
-        let mut subscriber_en2 = handler.subscribe(BOSS_NAME_EN.into());
-        let mut subscriber_ja2 = handler.subscribe(BOSS_NAME_JA.into());
+        let mut subscriber_en2 = handler.subscribe(BOSS_NAME_EN.clone());
+        let mut subscriber_ja2 = handler.subscribe(BOSS_NAME_JA.clone());
         let raid5 = next(&raid4, Japanese);
         {
             let raid5 = raid5.clone();

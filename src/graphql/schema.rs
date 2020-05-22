@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::model::*;
-use crate::RaidHandler;
+use crate::raid_handler::{BossEntry, RaidHandler};
 
 use async_graphql as gql;
 use async_graphql::Context;
@@ -11,7 +11,7 @@ pub struct SubscriptionRoot;
 
 #[gql::Subscription]
 impl SubscriptionRoot {
-    async fn bosses(&self, ctx: &Context<'_>) -> impl Stream<Item = Arc<Boss>> {
+    async fn bosses(&self, ctx: &Context<'_>) -> impl Stream<Item = Arc<BossEntry>> {
         ctx.data::<RaidHandler>().subscribe_boss_updates()
     }
 
@@ -28,12 +28,13 @@ pub struct QueryRoot;
 
 #[gql::Object]
 impl QueryRoot {
-    async fn bosses(&self, ctx: &Context<'_>) -> Vec<Arc<Boss>> {
-        ctx.data::<RaidHandler>().bosses()
+    // TODO: pagination, first/last, etc
+    async fn bosses(&self, ctx: &Context<'_>) -> Vec<Arc<BossEntry>> {
+        ctx.data::<RaidHandler>().bosses().clone()
     }
 
-    async fn boss(&self, ctx: &Context<'_>, name: String) -> Option<Arc<Boss>> {
-        ctx.data::<RaidHandler>().boss(name.into())
+    async fn boss(&self, ctx: &Context<'_>, name: String) -> Option<Arc<BossEntry>> {
+        ctx.data::<RaidHandler>().boss(&name.into())
     }
 }
 
@@ -59,28 +60,26 @@ impl LangString {
 
 #[gql::Object]
 /// A raid boss
-impl Boss {
+impl BossEntry {
     /// Boss name
     async fn name(&self) -> &LangString {
-        &self.name
+        &self.boss().name
     }
 
     /// Twitter image URL
     async fn image(&self) -> &LangString {
-        &self.image
+        &self.boss().image
     }
 
     /// The level of the boss, if known
     async fn level(&self) -> Option<Level> {
-        self.level
+        self.boss().level
     }
 
     /// List of raid tweets
-    async fn tweets(&self, ctx: &gql::Context<'_>) -> Vec<Arc<Raid>> {
-        match self.name.default() {
-            Some(name) => ctx.data::<RaidHandler>().history(name.clone()),
-            None => Vec::new(),
-        }
+    async fn tweets(&self) -> Vec<Arc<Raid>> {
+        // TODO: Pagination
+        self.history().read().iter().cloned().collect()
     }
 }
 

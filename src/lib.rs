@@ -6,4 +6,4 @@ mod raid_handler;
 pub mod twitter;
 
 pub use crate::error::{Error, Result};
-pub use crate::raid_handler::RaidHandler;
+pub use crate::raid_handler::{BossEntry, RaidHandler};

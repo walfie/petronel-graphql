@@ -36,6 +36,11 @@ struct Opt {
     #[structopt(env = "ACCESS_TOKEN_SECRET", hide_env_values = true)]
     access_token_secret: String,
 
+    #[structopt(env = "RAID_HISTORY_SIZE", default_value = "10")]
+    raid_history_size: usize,
+    #[structopt(env = "BROADCAST_BUFFER_SIZE", default_value = "10")]
+    broadcast_capacity: usize,
+
     #[structopt(
         long = "bind",
         short = "b",
@@ -65,9 +70,8 @@ async fn main() -> anyhow::Result<()> {
     let conn = hyper_tls::HttpsConnector::new();
     let client = hyper::Client::builder().build::<_, hyper::Body>(conn);
 
-    let capacity = 10; // TODO: configurable
     let concurrency = 5; // TODO: configurable
-    let raid_handler = RaidHandler::new(capacity);
+    let raid_handler = RaidHandler::new(opt.raid_history_size, opt.broadcast_capacity);
     let hash_updater = image_hash::Updater::new(
         log.clone(),
         HyperImageHasher::new(client.clone()),
