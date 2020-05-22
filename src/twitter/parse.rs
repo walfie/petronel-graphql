@@ -2,14 +2,15 @@ use crate::model::{Language, Raid};
 use crate::twitter::model::Tweet;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::borrow::Cow;
 use std::convert::TryFrom;
 
 #[derive(Clone, Debug, PartialEq)]
 struct TextParts<'a> {
     language: Language,
-    text: Option<&'a str>,
+    text: Option<Cow<'a, str>>,
     raid_id: &'a str,
-    boss_name: &'a str,
+    boss_name: Cow<'a, str>,
 }
 
 #[cfg(test)]
@@ -22,9 +23,9 @@ impl<'a> TextParts<'a> {
     ) -> Self {
         TextParts {
             language,
-            text,
+            text: text.map(Cow::from),
             raid_id,
-            boss_name,
+            boss_name: boss_name.into(),
         }
     }
 }
@@ -72,20 +73,25 @@ fn parse_text<'a>(tweet_text: &'a str) -> Option<TextParts<'a>> {
             if let (Some(text), Some(id), Some(boss), Some(url)) =
                 (c.name("text"), c.name("id"), c.name("boss"), c.name("url"))
             {
-                let boss_name = boss.as_str().trim();
+                let boss_name_raw = boss.as_str().trim();
                 let url_str = url.as_str();
 
-                if boss_name.contains("http")
+                if boss_name_raw.contains("http")
                     || !url_str.is_empty() && !REGEX_IMAGE_URL.is_match(url_str)
                 {
                     return None;
                 }
 
+                let boss_name = html_decode(boss_name_raw);
                 let t = text.as_str().trim();
 
                 Some(TextParts {
                     language: lang,
-                    text: if t.is_empty() { None } else { Some(t) },
+                    text: if t.is_empty() {
+                        None
+                    } else {
+                        Some(html_decode(t))
+                    },
                     raid_id: id.as_str().trim(),
                     boss_name,
                 })
@@ -93,6 +99,17 @@ fn parse_text<'a>(tweet_text: &'a str) -> Option<TextParts<'a>> {
                 None
             }
         })
+}
+
+fn html_decode(text: &str) -> Cow<'_, str> {
+    if text.contains('&') {
+        match escaper::decode_html_sloppy(text) {
+            Ok(decoded) => Cow::Owned(decoded),
+            _ => Cow::Borrowed(text),
+        }
+    } else {
+        Cow::Borrowed(text)
+    }
 }
 
 impl TryFrom<Tweet> for Raid {
@@ -127,7 +144,7 @@ impl TryFrom<Tweet> for Raid {
             boss_name: parsed.boss_name.into(),
             user_name: tweet.user.screen_name.into(),
             user_image,
-            text: parsed.text.map(ToOwned::to_owned),
+            text: parsed.text.map(Cow::into_owned),
             created_at: tweet.created_at,
             language: parsed.language,
             image_url: tweet.entities.media.map(|media| media.media_url_https),
@@ -360,6 +377,24 @@ mod test {
                 Some("Hey\nNewlines\nAre\nCool"),
                 "ABCD1234",
                 "Lvl 60 Ozorotter",
+            ))
+        );
+    }
+
+    #[test]
+    fn decode_html_entities() {
+        assert_eq!(
+            parse_text(
+                "Help me ABCD1234 :Battle ID\n\
+                 I need backup!\n\
+                 Huanglong &amp; Qilin (Impossible)\n\
+                 http://example.com/image-that-is-ignored.png",
+            ),
+            Some(TextParts::new(
+                English,
+                Some("Help me"),
+                "ABCD1234",
+                "Huanglong & Qilin (Impossible)",
             ))
         );
     }

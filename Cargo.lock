@@ -553,6 +553,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb1f6b1ce1c140482ea30ddd3335fc0024ac7ee112895426e0a629a6c20adfe3"
 
 [[package]]
+name = "entities"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5320ae4c3782150d900b79807611a59a99fc9a1d61d686faafc24b93fc8d7ca"
+
+[[package]]
+name = "escaper"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39da344028c2227132b2dfa7c186e2104ecc153467583d00ed9c398f9ff693b0"
+dependencies = [
+ "entities",
+]
+
+[[package]]
 name = "fake-simd"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1451,6 +1466,7 @@ dependencies = [
  "chrono",
  "circular-queue",
  "dashmap",
+ "escaper",
  "futures",
  "http",
  "hyper",
