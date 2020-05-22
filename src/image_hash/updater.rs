@@ -40,7 +40,8 @@ where
         let mut hashes = Box::pin(hashes);
 
         let hash_requester = async move {
-            while let Some(boss) = boss_stream.next().await {
+            while let Some(entry) = boss_stream.next().await {
+                let boss = entry.boss();
                 if boss.image_hash.is_some() {
                     continue;
                 }
@@ -60,7 +61,7 @@ where
         let hash_updater = async move {
             while let Some(result) = hashes.next().await {
                 match result {
-                    Ok(item) => handler.update_image_hash(item.boss_name, item.image_hash),
+                    Ok(item) => handler.update_image_hash(&item.boss_name, item.image_hash),
                     Err(e) => slog::warn!(log, "Failed to get image hash"; "error" => %e),
                 }
             }
