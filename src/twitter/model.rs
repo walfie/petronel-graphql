@@ -8,6 +8,9 @@ pub struct Tweet {
     pub id: TweetId,
     #[serde(deserialize_with = "deserialize_datetime")]
     pub created_at: DateTime,
+    // TODO: Text returned from the API is html encoded. Might want to decode.
+    // E.g., "Huanglong &amp; Qilin (Impossible)"
+    // https://github.com/sferik/twitter/issues/348
     pub text: String,
     pub user: User,
     pub entities: Entities,
