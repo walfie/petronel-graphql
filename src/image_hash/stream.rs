@@ -128,6 +128,7 @@ mod test {
     use crate::error::{Error, Result};
     use async_trait::async_trait;
     use http::StatusCode;
+    use once_cell::sync::Lazy;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering::SeqCst;
 
@@ -147,40 +148,37 @@ mod test {
         }
     }
 
-    const IMAGE1: &'static str = "http://example.com/image1.png";
-    const IMAGE2: &'static str = "http://example.com/image2.png";
-    const IMAGE3: &'static str = "http://example.com/image3.png";
+    const IMAGE1: Lazy<Uri> = Lazy::new(|| "http://example.com/image1.png".parse().unwrap());
+    const IMAGE2: Lazy<Uri> = Lazy::new(|| "http://example.com/image2.png".parse().unwrap());
+    const IMAGE3: Lazy<Uri> = Lazy::new(|| "http://example.com/image3.png".parse().unwrap());
 
     #[async_trait]
     impl ImageHasher for MockImageHasher {
         async fn hash(&self, uri: Uri) -> Result<ImageHash> {
             // Asserting that once an image hash is successful, the hash is
             // never computed again (the last successful value is reused)
-            match uri.to_string().as_ref() {
-                IMAGE1 => {
-                    self.image1_requested.fetch_add(1, SeqCst);
-                    match self.image1_requested.load(SeqCst) {
-                        1 => Ok(ImageHash(1)),
-                        _ => unreachable!(),
-                    }
+            if uri == *IMAGE1 {
+                self.image1_requested.fetch_add(1, SeqCst);
+                match self.image1_requested.load(SeqCst) {
+                    1 => Ok(ImageHash(1)),
+                    _ => unreachable!(),
                 }
-                IMAGE2 => {
-                    self.image2_requested.fetch_add(1, SeqCst);
-                    match self.image2_requested.load(SeqCst) {
-                        1 => Ok(ImageHash(2)),
-                        _ => unreachable!(),
-                    }
+            } else if uri == *IMAGE2 {
+                self.image2_requested.fetch_add(1, SeqCst);
+                match self.image2_requested.load(SeqCst) {
+                    1 => Ok(ImageHash(2)),
+                    _ => unreachable!(),
                 }
-                IMAGE3 => {
-                    self.image3_requested.fetch_add(1, SeqCst);
-                    match self.image3_requested.load(SeqCst) {
-                        1 => Err(Error::Http(StatusCode::INTERNAL_SERVER_ERROR)),
-                        2 => Err(Error::Http(StatusCode::SERVICE_UNAVAILABLE)),
-                        3 => Ok(ImageHash(3)),
-                        _ => unreachable!(),
-                    }
+            } else if uri == *IMAGE3 {
+                self.image3_requested.fetch_add(1, SeqCst);
+                match self.image3_requested.load(SeqCst) {
+                    1 => Err(Error::Http(StatusCode::INTERNAL_SERVER_ERROR)),
+                    2 => Err(Error::Http(StatusCode::SERVICE_UNAVAILABLE)),
+                    3 => Ok(ImageHash(3)),
+                    _ => unreachable!(),
                 }
-                _ => unreachable!(),
+            } else {
+                unreachable!()
             }
         }
     }
@@ -192,9 +190,9 @@ mod test {
 
         // Request each boss 3 times
         for _ in 0..3usize {
-            tx.request_hash("Boss1".into(), IMAGE1.parse().unwrap());
-            tx.request_hash("Boss2".into(), IMAGE2.parse().unwrap());
-            tx.request_hash("Boss3".into(), IMAGE3.parse().unwrap());
+            tx.request_hash("Boss1".into(), IMAGE1.clone());
+            tx.request_hash("Boss2".into(), IMAGE2.clone());
+            tx.request_hash("Boss3".into(), IMAGE3.clone());
         }
 
         // Should receive each successful hash result only once
@@ -214,9 +212,9 @@ mod test {
         ));
 
         // Request hashes for all the images again
-        tx.request_hash("Boss1".into(), IMAGE1.parse().unwrap());
-        tx.request_hash("Boss2".into(), IMAGE2.parse().unwrap());
-        tx.request_hash("Boss3".into(), IMAGE3.parse().unwrap());
+        tx.request_hash("Boss1".into(), IMAGE1.clone());
+        tx.request_hash("Boss2".into(), IMAGE2.clone());
+        tx.request_hash("Boss3".into(), IMAGE3.clone());
 
         // The hasher should reuse previously successful attempts
         let next = rx.next().await.unwrap();
@@ -235,14 +233,14 @@ mod test {
         ));
 
         // Retry boss3 again, and it should succeed
-        tx.request_hash("Boss3".into(), IMAGE3.parse().unwrap());
+        tx.request_hash("Boss3".into(), IMAGE3.clone());
 
         let next = rx.next().await.unwrap();
         assert_eq!(&next.boss_name, "Boss3");
         assert_eq!(next.image_hash.unwrap(), ImageHash(3));
 
         // Retry once more, and it should reuse the successful value
-        tx.request_hash("Boss3".into(), IMAGE3.parse().unwrap());
+        tx.request_hash("Boss3".into(), IMAGE3.clone());
 
         let next = rx.next().await.unwrap();
         assert_eq!(&next.boss_name, "Boss3");
