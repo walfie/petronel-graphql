@@ -20,7 +20,7 @@ impl JsonFile {
         Self { path }
     }
 
-    pub fn filename(&self) -> &str {
+    pub fn path(&self) -> &str {
         self.path.as_ref()
     }
 }

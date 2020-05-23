@@ -100,12 +100,12 @@ async fn main() -> anyhow::Result<()> {
                     if let Err(e) = file.save_bosses(&bosses).await {
                         slog::warn!(
                             log, "Failed to write boss data to file";
-                            "error" => %e, "filename" => file.filename()
+                            "error" => %e, "path" => file.path()
                         )
                     } else {
                         slog::debug!(
                             log, "Saved bosses to file";
-                            "filename" => file.filename(), "count" => bosses.len()
+                            "path" => file.path(), "count" => bosses.len()
                         );
                     }
                 }
@@ -157,14 +157,14 @@ async fn get_initial_bosses(log: &slog::Logger, opt: &opts::Options) -> anyhow::
             Ok(bosses) => {
                 slog::info!(
                     log, "Loaded bosses from file";
-                    "filename" => file.filename(), "count" => bosses.len()
+                    "path" => file.path(), "count" => bosses.len()
                 );
                 bosses
             }
             Err(e) => {
                 slog::warn!(
                     log, "Failed to load bosses from file. Initializing with empty list.";
-                    "error" => %e, "filename" => file.filename()
+                    "error" => %e, "path" => file.path()
                 );
                 Vec::new()
             }
