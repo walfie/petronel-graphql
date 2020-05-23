@@ -48,7 +48,7 @@ pub struct Options {
     pub connection_retry_delay: Duration,
 
     /// Reconnects to the Twitter streaming API if no messages are received in this amount of time
-    #[structopt(long, env, default_value = "60s", parse(try_from_str = parse_duration))]
+    #[structopt(long, env, default_value = "30s", parse(try_from_str = parse_duration))]
     pub connection_timeout: Duration,
 
     /// Number of tweets to retain for each boss
@@ -74,7 +74,7 @@ pub struct Options {
     ///
     /// E.g., `15d` means any boss not seen in 15 days will be removed
     #[structopt(long, env, default_value = "15d", parse(try_from_str = parse_duration))]
-    pub boss_max_age: Duration,
+    pub boss_ttl: Duration,
 
     /// Bind IP for the HTTP server
     #[structopt(long, short, env, default_value = "127.0.0.1")]

@@ -45,14 +45,14 @@ async fn main() -> anyhow::Result<()> {
     // * requests image hashes for bosses that have an image but no hash
     //   (possibly due to a failed HTTP request)
     tokio::spawn({
-        let max_age = chrono::Duration::from_std(opt.boss_max_age)?;
+        let ttl = chrono::Duration::from_std(opt.boss_ttl)?;
         let raid_handler = raid_handler.clone();
         let mut interval = tokio::time::interval(opt.cleanup_interval);
 
         async move {
             loop {
                 interval.tick().await;
-                let long_ago = Utc::now() - max_age;
+                let long_ago = Utc::now() - ttl;
                 raid_handler.retain(|entry| {
                     let boss = entry.boss();
                     if boss.image_hash.is_none() && boss.image.canonical().is_some() {
