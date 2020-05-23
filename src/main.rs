@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
                 let long_ago = Utc::now() - max_age;
                 raid_handler.retain(|entry| {
                     let boss = entry.boss();
-                    if boss.image_hash.is_none() && boss.image.default().is_some() {
+                    if boss.image_hash.is_none() && boss.image.canonical().is_some() {
                         hash_inbox.request_hash_for_boss(boss);
                     }
 

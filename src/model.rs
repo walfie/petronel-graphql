@@ -48,7 +48,7 @@ impl Language {
     pub const VALUES: &'static [Language] = &[Self::Japanese, Self::English];
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct LangString {
     pub en: Option<CachedString>,
     pub ja: Option<CachedString>,
@@ -66,7 +66,7 @@ impl LangString {
         }
     }
 
-    pub fn default(&self) -> Option<&CachedString> {
+    pub fn canonical(&self) -> Option<&CachedString> {
         self.ja.as_ref().or_else(|| self.en.as_ref())
     }
 
@@ -106,6 +106,10 @@ impl LangString {
 #[derive(Debug)]
 pub struct AtomicDateTime(AtomicI64);
 impl AtomicDateTime {
+    pub fn now() -> Self {
+        Self::from(&Utc::now())
+    }
+
     pub fn replace(&self, value: &DateTime) {
         self.0.store(value.timestamp_millis(), Relaxed)
     }
@@ -171,7 +175,7 @@ impl From<&Raid> for Boss {
         let lang = raid.language;
 
         let image = match raid.image_url {
-            None => LangString::empty(),
+            None => Default::default(),
             Some(ref url) => LangString::new(lang, url.clone()),
         };
 

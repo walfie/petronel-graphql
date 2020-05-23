@@ -42,8 +42,8 @@ impl QueryRoot {
 /// A string (name, URL, etc) that differs based on language
 impl LangString {
     /// The Japanese string, if it exists. Otherwise, the English one.
-    #[field(name = "default")]
-    async fn gql_default(&self) -> Option<&str> {
+    #[field(name = "canonical")]
+    async fn gql_canonical(&self) -> Option<&str> {
         self.ja.as_deref().or_else(|| self.en.as_deref())
     }
 

@@ -162,7 +162,7 @@ impl BossMap {
             .map(|guard| guard.value().clone())
             .collect::<Vec<_>>();
 
-        vec.sort_by_key(|entry| (entry.boss.level, entry.boss.name.default().cloned()));
+        vec.sort_by_key(|entry| (entry.boss.level, entry.boss.name.canonical().cloned()));
         vec.dedup_by(|a, b| Arc::ptr_eq(a, b));
 
         self.vec.store(Arc::new(vec));
