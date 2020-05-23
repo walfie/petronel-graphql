@@ -287,10 +287,12 @@ impl RaidHandlerInner {
     }
 
     pub fn update_image_hash(&self, boss_name: &BossName, image_hash: ImageHash) {
-        let guard = match self.bosses.get(boss_name) {
+        let guard_opt = self.bosses.get(boss_name);
+        let guard = match guard_opt {
             Some(g) => g,
             None => return,
         };
+
         let boss_entry = guard.value();
 
         let this_boss = &boss_entry.boss;

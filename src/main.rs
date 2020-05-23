@@ -51,8 +51,6 @@ async fn main() -> anyhow::Result<()> {
         opt.image_hash_concurrency,
     );
     let (hash_inbox, hash_worker) = hash_updater.run();
-    tokio::spawn(hash_worker);
-
     bosses_to_request_hashes_for
         .iter()
         .for_each(|boss| hash_inbox.request_hash_for_boss(boss));
@@ -68,6 +66,7 @@ async fn main() -> anyhow::Result<()> {
         let mut interval = tokio::time::interval(opt.cleanup_interval);
 
         async move {
+            interval.tick().await; // The first tick completes immediately
             loop {
                 interval.tick().await;
                 let long_ago = Utc::now() - ttl;
@@ -93,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
             let raid_handler = raid_handler.clone();
 
             async move {
+                interval.tick().await; // The first tick completes immediately
                 loop {
                     interval.tick().await;
                     let guard = raid_handler.bosses();
@@ -102,13 +102,18 @@ async fn main() -> anyhow::Result<()> {
                             log, "Failed to write boss data to file";
                             "error" => %e, "filename" => file.filename()
                         )
+                    } else {
+                        slog::debug!(
+                            log, "Saved bosses to file";
+                            "filename" => file.filename(), "count" => bosses.len()
+                        );
                     }
                 }
             }
         });
     }
 
-    let (mut tweet_stream, worker) = twitter::connect_with_retries(
+    let (mut tweet_stream, twitter_worker) = twitter::connect_with_retries(
         log.clone(),
         client,
         token,
@@ -124,10 +129,14 @@ async fn main() -> anyhow::Result<()> {
     });
 
     slog::info!(log, "Starting HTTP server"; "port" => opt.port, "ip" => &opt.bind_ip);
-    let server = warp::serve(routes).try_bind(bind_addr);
+    let server = tokio::spawn(warp::serve(routes).try_bind(bind_addr));
 
     tokio::select! {
-        _ = worker => {
+        // For some reason the `hash_worker` doesn't work consistently if started with `tokio::spawn`
+        _ = hash_worker => {
+            slog::error!(log, "Hash updater ended unexpectedly");
+        }
+        _ = twitter_worker => {
             slog::error!(log, "Disconnected from Twitter stream");
         }
         _ = server => {

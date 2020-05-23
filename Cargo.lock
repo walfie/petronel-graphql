@@ -492,9 +492,9 @@ dependencies = [
 
 [[package]]
 name = "dashmap"
-version = "4.0.0-rc2"
+version = "4.0.0-rc3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c14a72bef0611ed0faaa87adcfdffb3ff39e45586e66a9e515c9d06d02135bb6"
+checksum = "c14b72a59fa48ede7dce326a0d59b887dc28a9fe3c8dc7e22c655a6fc7e5e6d0"
 dependencies = [
  "once_cell",
 ]

@@ -19,8 +19,10 @@ pub type RaidId = String;
 pub struct Boss {
     pub name: LangString,
     pub image: LangString,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub level: Option<Level>,
     pub last_seen_at: AtomicDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub image_hash: Option<ImageHash>,
 }
 
@@ -71,7 +73,9 @@ impl Language {
 
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct LangString {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub en: Option<CachedString>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ja: Option<CachedString>,
 }
 
