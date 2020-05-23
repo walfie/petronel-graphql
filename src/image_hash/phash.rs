@@ -1,10 +1,11 @@
 use image::imageops::FilterType;
 use image::DynamicImage;
+use serde::{Deserialize, Serialize};
 
 const SIZE: usize = 32;
 const SMALL_SIZE: usize = 8;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ImageHash(pub(crate) i64);
 
 impl ImageHash {

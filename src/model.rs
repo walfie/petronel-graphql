@@ -1,12 +1,12 @@
 use chrono::offset::{TimeZone, Utc};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering::Relaxed;
 
 pub use crate::image_hash::phash::ImageHash;
-
 pub type CachedString = string_cache::DefaultAtom;
 pub type BossName = CachedString;
 pub type DateTime = chrono::DateTime<Utc>;
@@ -14,7 +14,8 @@ pub type Level = i16;
 pub type TweetId = u64;
 pub type RaidId = String;
 
-#[derive(Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Boss {
     pub name: LangString,
     pub image: LangString,
@@ -64,7 +65,7 @@ impl Language {
     pub const VALUES: &'static [Language] = &[Self::Japanese, Self::English];
 }
 
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct LangString {
     pub en: Option<CachedString>,
     pub ja: Option<CachedString>,
@@ -163,6 +164,12 @@ impl From<&DateTime> for AtomicDateTime {
     }
 }
 
+impl From<i64> for AtomicDateTime {
+    fn from(value: i64) -> AtomicDateTime {
+        AtomicDateTime(AtomicI64::new(value))
+    }
+}
+
 impl PartialEq for AtomicDateTime {
     fn eq(&self, other: &Self) -> bool {
         self.as_i64() == other.as_i64()
@@ -170,6 +177,27 @@ impl PartialEq for AtomicDateTime {
 }
 
 impl Eq for AtomicDateTime {}
+
+impl<'de> Deserialize<'de> for AtomicDateTime {
+    #[inline]
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let val = i64::deserialize(deserializer)?;
+        Ok(val.into())
+    }
+}
+
+impl Serialize for AtomicDateTime {
+    #[inline]
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i64(self.as_i64())
+    }
+}
 
 static REGEX_LEVEL: Lazy<Regex> =
     Lazy::new(|| Regex::new("^Lv(?:l )?(?P<level>[0-9]+) ").expect("invalid level regex"));
@@ -207,9 +235,47 @@ impl From<&Raid> for Boss {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     #[test]
     fn parse_level() {
         assert_eq!(super::parse_level("Lv75 セレスト・マグナ").unwrap(), 75);
         assert_eq!(super::parse_level("Lvl 75 Celeste Omega").unwrap(), 75);
+    }
+
+    #[test]
+    fn boss_serde() {
+        let json = serde_json::from_str::<Boss>(
+            r#"{
+                "name": {
+                    "en": "Lvl 60 Ozorotter",
+                    "ja": "Lv60 オオゾラッコ"
+                },
+                "image": {
+                    "en": "http://example.com/image_en.png",
+                    "ja": "http://example.com/image_ja.png"
+                },
+                "level": 60,
+                "lastSeenAt": 1234,
+                "imageHash": 6789
+            }"#,
+        )
+        .unwrap();
+
+        let boss = Boss {
+            name: LangString {
+                en: Some("Lvl 60 Ozorotter".into()),
+                ja: Some("Lv60 オオゾラッコ".into()),
+            },
+            image: LangString {
+                en: Some("http://example.com/image_en.png".into()),
+                ja: Some("http://example.com/image_ja.png".into()),
+            },
+            level: Some(60),
+            last_seen_at: AtomicDateTime::from(1234),
+            image_hash: Some(ImageHash::from(6789)),
+        };
+
+        assert_eq!(json, boss);
     }
 }
