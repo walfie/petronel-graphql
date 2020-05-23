@@ -28,8 +28,16 @@ async fn main() -> anyhow::Result<()> {
     let conn = hyper_tls::HttpsConnector::new();
     let client = hyper::Client::builder().build::<_, hyper::Body>(conn);
 
+    // Get boss list from cache
+    let initial_bosses = get_initial_bosses().await?;
+    let bosses_to_request_hashes_for = initial_bosses
+        .iter()
+        .filter(|b| b.needs_image_hash_update())
+        .cloned()
+        .collect::<Vec<_>>();
+
     let raid_handler = RaidHandler::new(
-        get_initial_bosses().await?,
+        initial_bosses,
         opt.raid_history_size,
         opt.broadcast_capacity,
     );
@@ -43,6 +51,10 @@ async fn main() -> anyhow::Result<()> {
     );
     let (hash_inbox, hash_worker) = hash_updater.run();
     tokio::spawn(hash_worker);
+
+    bosses_to_request_hashes_for
+        .iter()
+        .for_each(|boss| hash_inbox.request_hash_for_boss(boss));
 
     // Cleanup task that periodically:
     // * removes bosses that haven't been seen in a while
@@ -60,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
                 let long_ago = Utc::now() - ttl;
                 raid_handler.retain(|entry| {
                     let boss = entry.boss();
-                    if boss.image_hash.is_none() && boss.image.canonical().is_some() {
+                    if boss.needs_image_hash_update() {
                         hash_inbox.request_hash_for_boss(boss);
                     }
 

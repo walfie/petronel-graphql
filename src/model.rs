@@ -38,6 +38,10 @@ impl Boss {
         last_seen_at: AtomicDateTime::now(),
         image_hash: None,
     });
+
+    pub fn needs_image_hash_update(&self) -> bool {
+        self.image_hash.is_none() && self.image.canonical().is_some()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
