@@ -59,6 +59,10 @@ pub struct Options {
     #[structopt(long, env, default_value = "10")]
     pub broadcast_capacity: usize,
 
+    /// Max number of in-flight requests for boss image hashes
+    #[structopt(long, env, default_value = "5")]
+    pub image_hash_concurrency: usize,
+
     /// How often to run cleanup tasks
     ///
     /// This includes removing outdated bosses, removing broadcast channels for unknown bosses with

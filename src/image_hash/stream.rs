@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::image_hash::{ImageHash, ImageHasher};
-use crate::model::BossName;
+use crate::model::{Boss, BossName, Language};
 
 use dashmap::DashMap;
 use futures::stream::{Stream, StreamExt};
@@ -10,10 +10,10 @@ use futures::FutureExt;
 use http::Uri;
 use tokio::sync::mpsc;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct BossImageHash {
     pub boss_name: BossName,
-    pub image_hash: ImageHash,
+    pub image_hash: Result<ImageHash>,
 }
 
 #[derive(Debug, Clone)]
@@ -22,12 +22,19 @@ impl Inbox {
     pub fn request_hash(&self, boss_name: BossName, uri: Uri) {
         let _ = self.0.send((boss_name, uri));
     }
+
+    pub fn request_hash_for_boss(&self, boss: &Boss) {
+        for lang in Language::VALUES {
+            if let (Some(name), Some(image)) = (boss.name.get(*lang), boss.image.get(*lang)) {
+                if let Ok(url) = image.parse() {
+                    let _ = self.0.send((name.clone(), url));
+                }
+            }
+        }
+    }
 }
 
-pub fn stream<H>(
-    image_hasher: H,
-    concurrency: usize,
-) -> (Inbox, impl Stream<Item = Result<BossImageHash>>)
+pub fn stream<H>(image_hasher: H, concurrency: usize) -> (Inbox, impl Stream<Item = BossImageHash>)
 where
     H: ImageHasher + Send + Sync + 'static,
 {
@@ -42,7 +49,6 @@ where
 
         while let Some((boss_name, uri)) = rx_in.recv().await {
             let requested = requested.clone();
-            let image_hasher = image_hasher.clone();
 
             if requested.contains_key(&boss_name) {
                 continue;
@@ -50,16 +56,16 @@ where
 
             requested.insert(boss_name.clone(), ());
 
+            let image_hasher = image_hasher.clone();
             let future = async move {
-                match image_hasher.hash(uri).await {
-                    Ok(image_hash) => Ok(BossImageHash {
-                        boss_name,
-                        image_hash,
-                    }),
-                    Err(e) => {
-                        requested.clone().remove(&boss_name);
-                        Err(e)
-                    }
+                let image_hash = image_hasher.hash(uri).await;
+                if image_hash.is_err() {
+                    requested.clone().remove(&boss_name);
+                }
+
+                BossImageHash {
+                    boss_name,
+                    image_hash,
                 }
             };
 
@@ -128,24 +134,18 @@ mod test {
         }
 
         // Should receive each successful hash result only once
-        assert_eq!(
-            rx.next().await.unwrap().unwrap(),
-            BossImageHash {
-                boss_name: "Boss1".into(),
-                image_hash: ImageHash(1),
-            }
-        );
+        let next = rx.next().await.unwrap();
+        assert_eq!(&next.boss_name, "Boss1");
+        assert_eq!(next.image_hash.unwrap(), ImageHash(1));
 
-        assert_eq!(
-            rx.next().await.unwrap().unwrap(),
-            BossImageHash {
-                boss_name: "Boss2".into(),
-                image_hash: ImageHash(2),
-            }
-        );
+        let next = rx.next().await.unwrap();
+        assert_eq!(&next.boss_name, "Boss2");
+        assert_eq!(next.image_hash.unwrap(), ImageHash(2));
 
+        let next = rx.next().await.unwrap();
+        assert_eq!(&next.boss_name, "Boss3");
         assert!(matches!(
-            rx.next().await.unwrap(),
+            next.image_hash,
             Err(Error::Http(StatusCode::NOT_FOUND))
         ));
 
@@ -168,7 +168,7 @@ mod test {
         // The hasher should ignore previously successful requests,
         // and retry only ones that fail
         assert!(matches!(
-            rx.next().await.unwrap(),
+            rx.next().await.unwrap().image_hash,
             Err(Error::Http(StatusCode::NOT_FOUND))
         ));
 

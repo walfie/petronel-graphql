@@ -44,6 +44,10 @@ pub enum Language {
     English,
 }
 
+impl Language {
+    pub const VALUES: &'static [Language] = &[Self::Japanese, Self::English];
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LangString {
     pub en: Option<CachedString>,
@@ -71,6 +75,11 @@ impl LangString {
             Language::English => self.en = value,
             Language::Japanese => self.ja = value,
         }
+    }
+
+    pub fn for_each(&self, f: impl FnMut(&BossName) -> () + Copy) {
+        self.ja.iter().for_each(f);
+        self.en.iter().for_each(f);
     }
 
     pub fn merge(&self, other: &LangString) -> Self {

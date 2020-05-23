@@ -1,11 +1,9 @@
-use std::borrow::Borrow;
-use std::hash::Hash;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 
-use crate::model::{Boss, BossName, CachedString, DateTime, ImageHash, LangString, Raid};
+use crate::model::{Boss, BossName, CachedString, ImageHash, Raid};
 
 use arc_swap::ArcSwap;
 use circular_queue::CircularQueue;
@@ -14,15 +12,6 @@ use futures::stream::Stream;
 use parking_lot::RwLock;
 use tokio::stream::StreamExt;
 use tokio::sync::broadcast;
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct BossKey(pub(crate) BossName);
-
-impl Borrow<str> for BossKey {
-    fn borrow(&self) -> &str {
-        self.0.as_ref()
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct RaidHandler(Arc<RaidHandlerInner>);
@@ -118,9 +107,7 @@ impl BossEntry {
     }
 
     fn for_each_key(&self, f: impl FnMut(&BossName) -> () + Copy) {
-        let LangString { ja, en } = &self.boss.name;
-        ja.iter().for_each(f);
-        en.iter().for_each(f);
+        self.boss.name.for_each(f)
     }
 }
 
@@ -268,9 +255,8 @@ impl RaidHandlerInner {
         self.bosses.subscribe(boss_name)
     }
 
-    pub fn retain(&self, last_seen_after: DateTime) {
-        self.bosses
-            .retain(|_k, v| v.boss.last_seen_at.as_datetime() > last_seen_after);
+    pub fn retain(&self, mut predicate: impl FnMut(&Arc<BossEntry>) -> bool) {
+        self.bosses.retain(|_k, v| predicate(v));
     }
 
     pub fn subscribe_boss_updates(&self) -> impl Stream<Item = Arc<BossEntry>> {

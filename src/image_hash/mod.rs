@@ -30,7 +30,6 @@ impl HyperImageHasher {
 #[async_trait]
 impl ImageHasher for HyperImageHasher {
     async fn hash(&self, uri: Uri) -> Result<ImageHash> {
-        // TODO: Retry on error if not 4xx
         let resp = self.client.get(uri).await?;
         let body = hyper::body::to_bytes(resp).await?;
         Ok(crop_and_hash(&body)?)
