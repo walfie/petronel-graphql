@@ -40,7 +40,10 @@ where
         let mut hashes = Box::pin(hashes);
 
         let hash_inbox = inbox.clone();
+        let requester_log = log.clone();
         let hash_requester = async move {
+            // As bosses get discovered, request image hashes for
+            // those that have an image but no hash
             while let Some(entry) = boss_stream.next().await {
                 let boss = entry.boss();
                 if boss.image_hash.is_some() {
@@ -60,9 +63,16 @@ where
         };
 
         let hash_updater = async move {
+            // As hashes get computed, update the raid handler
             while let Some(item) = hashes.next().await {
                 match item.image_hash {
-                    Ok(image_hash) => handler.update_image_hash(&item.boss_name, image_hash),
+                    Ok(image_hash) => {
+                        slog::info!(
+                            requester_log, "Updated boss image hash";
+                            "bossName" => %item.boss_name
+                        );
+                        handler.update_image_hash(&item.boss_name, image_hash);
+                    }
                     Err(e) => slog::warn!(
                         log, "Failed to get image hash";
                         "error" => %e, "bossName" => %item.boss_name
