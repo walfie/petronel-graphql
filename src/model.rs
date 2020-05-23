@@ -23,6 +23,22 @@ pub struct Boss {
     pub image_hash: Option<ImageHash>,
 }
 
+impl Boss {
+    // Unfortunately, this has to be hardcoded somewhere because the boss
+    // image hashes are different between the English and Japanese versions.
+    // https://github.com/walfie/gbf-raidfinder/blob/master/docs/implementation.md#automatic-translations
+    pub const LVL_120_MEDUSA: Lazy<Boss> = Lazy::new(|| Boss {
+        name: LangString {
+            ja: Some("Lv120 メドゥーサ".into()),
+            en: Some("Lvl 120 Medusa".into()),
+        },
+        image: LangString::default(),
+        level: Some(120),
+        last_seen_at: AtomicDateTime::now(),
+        image_hash: None,
+    });
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Raid {
     pub id: RaidId,

@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use chrono::Utc;
 use futures::stream::StreamExt;
 use petronel_graphql::image_hash::HyperImageHasher;
+use petronel_graphql::model::Boss;
 use petronel_graphql::{image_hash, twitter, RaidHandler};
 use structopt::StructOpt;
 
@@ -27,7 +28,11 @@ async fn main() -> anyhow::Result<()> {
     let conn = hyper_tls::HttpsConnector::new();
     let client = hyper::Client::builder().build::<_, hyper::Body>(conn);
 
-    let raid_handler = RaidHandler::new(opt.raid_history_size, opt.broadcast_capacity);
+    let raid_handler = RaidHandler::new(
+        get_initial_bosses().await?,
+        opt.raid_history_size,
+        opt.broadcast_capacity,
+    );
 
     // Fetch boss images and calculate image hashes
     let hash_updater = image_hash::Updater::new(
@@ -96,4 +101,19 @@ async fn main() -> anyhow::Result<()> {
     };
 
     anyhow::bail!("could not start");
+}
+
+async fn get_initial_bosses() -> anyhow::Result<Vec<Boss>> {
+    let mut bosses = Vec::<Boss>::new();
+
+    // See comment on `Boss::LVL_120_MEDUSA` for the reasoning
+    if bosses
+        .iter()
+        .find(|b| b.name == Boss::LVL_120_MEDUSA.name)
+        .is_none()
+    {
+        bosses.push(Boss::LVL_120_MEDUSA.clone());
+    }
+
+    Ok(bosses)
 }

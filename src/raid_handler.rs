@@ -47,8 +47,9 @@ impl Stream for Subscription {
 }
 
 impl RaidHandler {
-    pub fn new(history_size: usize, broadcast_capacity: usize) -> Self {
+    pub fn new(bosses: Vec<Boss>, history_size: usize, broadcast_capacity: usize) -> Self {
         Self(Arc::new(RaidHandlerInner::new(
+            bosses,
             history_size,
             broadcast_capacity,
         )))
@@ -140,15 +141,30 @@ struct BossMap {
 }
 
 impl BossMap {
-    // TODO: Initialize with bosses
-    fn new(history_size: usize, broadcast_capacity: usize) -> Self {
-        Self {
+    fn new(mut bosses: Vec<Boss>, history_size: usize, broadcast_capacity: usize) -> Self {
+        let this = Self {
             map: DashMap::new(),
             vec: ArcSwap::from_pointee(Vec::new()),
             waiting: DashMap::new(),
             history_size,
             broadcast_capacity,
+        };
+
+        bosses.sort_by_key(|boss| boss.name.canonical().cloned());
+        bosses.dedup_by(|a, b| a.name == b.name);
+
+        for boss in bosses {
+            let (tx, _) = broadcast::channel(broadcast_capacity);
+            let entry = BossEntry {
+                boss,
+                history: RwLock::new(CircularQueue::with_capacity(history_size)),
+                broadcast: tx,
+            };
+
+            this.insert(&Arc::new(entry));
         }
+
+        this
     }
 
     fn get(&self, name: &CachedString) -> Option<ElementGuard<CachedString, Arc<BossEntry>>> {
@@ -236,15 +252,12 @@ impl BossMap {
 }
 
 impl RaidHandlerInner {
-    // TODO:
-    // * Initialize with existing bosses, persistence
-    // * Manual translation override for Lvl 120 Medusa
-    // * Prometheus metrics
-    fn new(history_size: usize, broadcast_capacity: usize) -> Self {
+    // TODO: Prometheus metrics
+    fn new(bosses: Vec<Boss>, history_size: usize, broadcast_capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(broadcast_capacity);
 
         Self {
-            bosses: BossMap::new(history_size, broadcast_capacity),
+            bosses: BossMap::new(bosses, history_size, broadcast_capacity),
             boss_broadcast: tx,
             history_size,
             broadcast_capacity,
@@ -411,7 +424,7 @@ mod test {
         let history_size = 2;
         let broadcast_capacity = 10;
 
-        let handler = RaidHandler::new(history_size, broadcast_capacity);
+        let handler = RaidHandler::new(Vec::new(), history_size, broadcast_capacity);
 
         let mut subscriber_ja = handler.subscribe(BOSS_NAME_JA.clone());
         let mut subscriber_en = handler.subscribe(BOSS_NAME_EN.clone());
