@@ -21,7 +21,7 @@ fn parse_duration(s: &str) -> anyhow::Result<Duration> {
         .ok_or_else(|| anyhow::Error::msg("failed to parse duration"))
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, StructOpt, Clone)]
 pub struct Options {
     /// Twitter consumer key
     #[structopt(long, env, hide_env_values = true)]
@@ -69,6 +69,15 @@ pub struct Options {
     /// no subscribers, etc.
     #[structopt(long, env, default_value = "5m", parse(try_from_str = parse_duration))]
     pub cleanup_interval: Duration,
+
+    /// How often to flush boss data to persistent filesystem storage
+    #[structopt(long, env, default_value = "5m", parse(try_from_str = parse_duration))]
+    pub storage_file_flush_interval: Duration,
+
+    // TODO: Add note on which takes precedence if redis is specified
+    /// JSON file to read/write boss data to
+    #[structopt(long, env)]
+    pub storage_file_path: Option<String>,
 
     /// Bosses not seen for this long will be removed during cleanup tasks
     ///

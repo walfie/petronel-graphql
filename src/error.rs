@@ -21,4 +21,6 @@ pub enum Error {
     StreamClosed,
     #[error("invalid bind address: {0}")]
     BindPort(#[from] std::net::AddrParseError),
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
 }

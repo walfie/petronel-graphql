@@ -7,6 +7,7 @@ use chrono::Utc;
 use futures::stream::StreamExt;
 use petronel_graphql::image_hash::HyperImageHasher;
 use petronel_graphql::model::Boss;
+use petronel_graphql::persistence::{JsonFile, Persistence};
 use petronel_graphql::{image_hash, twitter, RaidHandler};
 use structopt::StructOpt;
 
@@ -16,20 +17,13 @@ async fn main() -> anyhow::Result<()> {
 
     let bind_addr: SocketAddr = format!("{}:{}", opt.bind_ip, opt.port).parse()?;
 
-    let token = twitter::Token::new(
-        opt.consumer_key,
-        opt.consumer_secret,
-        opt.access_token,
-        opt.access_token_secret,
-    );
-
     let log = log::logger(opt.json_logs);
 
     let conn = hyper_tls::HttpsConnector::new();
     let client = hyper::Client::builder().build::<_, hyper::Body>(conn);
 
     // Get boss list from cache
-    let initial_bosses = get_initial_bosses().await?;
+    let initial_bosses = get_initial_bosses(&log, &opt.clone()).await?;
     let bosses_to_request_hashes_for = initial_bosses
         .iter()
         .filter(|b| b.needs_image_hash_update())
@@ -40,6 +34,13 @@ async fn main() -> anyhow::Result<()> {
         initial_bosses,
         opt.raid_history_size,
         opt.broadcast_capacity,
+    );
+
+    let token = twitter::Token::new(
+        opt.consumer_key,
+        opt.consumer_secret,
+        opt.access_token,
+        opt.access_token_secret,
     );
 
     // Fetch boss images and calculate image hashes
@@ -82,6 +83,31 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Periodically write boss data to persistent storage
+    if let Some(path) = opt.storage_file_path {
+        let file = JsonFile::new(path);
+
+        tokio::spawn({
+            let log = log.clone();
+            let mut interval = tokio::time::interval(opt.storage_file_flush_interval);
+            let raid_handler = raid_handler.clone();
+
+            async move {
+                loop {
+                    interval.tick().await;
+                    let guard = raid_handler.bosses();
+                    let bosses = guard.iter().map(|entry| entry.boss()).collect::<Vec<_>>();
+                    if let Err(e) = file.save_bosses(&bosses).await {
+                        slog::warn!(
+                            log, "Failed to write boss data to file";
+                            "error" => %e, "filename" => file.filename()
+                        )
+                    }
+                }
+            }
+        });
+    }
+
     let (mut tweet_stream, worker) = twitter::connect_with_retries(
         log.clone(),
         client,
@@ -115,8 +141,28 @@ async fn main() -> anyhow::Result<()> {
     anyhow::bail!("could not start");
 }
 
-async fn get_initial_bosses() -> anyhow::Result<Vec<Boss>> {
-    let mut bosses = Vec::<Boss>::new();
+async fn get_initial_bosses(log: &slog::Logger, opt: &opts::Options) -> anyhow::Result<Vec<Boss>> {
+    let mut bosses = if let Some(path) = &opt.storage_file_path {
+        let file = JsonFile::new(path.clone());
+        match file.get_bosses().await {
+            Ok(bosses) => {
+                slog::info!(
+                    log, "Loaded bosses from file";
+                    "filename" => file.filename(), "count" => bosses.len()
+                );
+                bosses
+            }
+            Err(e) => {
+                slog::warn!(
+                    log, "Failed to load bosses from file. Initializing with empty list.";
+                    "error" => %e, "filename" => file.filename()
+                );
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
 
     // See comment on `Boss::LVL_120_MEDUSA` for the reasoning
     if bosses
