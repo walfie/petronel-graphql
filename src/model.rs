@@ -102,9 +102,12 @@ impl LangString {
         }
     }
 
-    pub fn for_each(&self, f: impl FnMut(&BossName) -> () + Copy) {
-        self.ja.iter().for_each(f);
-        self.en.iter().for_each(f);
+    pub fn for_each(&self, mut f: impl FnMut(&BossName)) {
+        for opt in &[self.ja.as_ref(), self.en.as_ref()] {
+            if let Some(value) = opt {
+                f(value)
+            }
+        }
     }
 
     pub fn merge(&self, other: &LangString) -> Self {

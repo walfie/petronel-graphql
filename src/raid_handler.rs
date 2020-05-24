@@ -107,7 +107,7 @@ impl BossEntry {
         &self.history
     }
 
-    fn for_each_key(&self, f: impl FnMut(&BossName) -> () + Copy) {
+    fn for_each_key(&self, f: impl FnMut(&BossName)) {
         self.boss.name.for_each(f)
     }
 }
@@ -142,28 +142,31 @@ struct BossMap {
 
 impl BossMap {
     fn new(mut bosses: Vec<Boss>, history_size: usize, broadcast_capacity: usize) -> Self {
+        bosses.sort_by_key(|boss| boss.name.canonical().cloned());
+        bosses.dedup_by(|a, b| a.name == b.name);
+
+        let mut init = Vec::new();
+
+        for boss in bosses {
+            let (tx, _) = broadcast::channel(broadcast_capacity);
+            let entry = Arc::new(BossEntry {
+                boss,
+                history: RwLock::new(CircularQueue::with_capacity(history_size)),
+                broadcast: tx,
+            });
+
+            entry.for_each_key(|key| init.push((key.clone(), entry.clone())));
+        }
+
         let this = Self {
-            map: DashMap::new(),
+            map: DashMap::from_iter(init),
             vec: ArcSwap::from_pointee(Vec::new()),
             waiting: DashMap::new(),
             history_size,
             broadcast_capacity,
         };
 
-        bosses.sort_by_key(|boss| boss.name.canonical().cloned());
-        bosses.dedup_by(|a, b| a.name == b.name);
-
-        for boss in bosses {
-            let (tx, _) = broadcast::channel(broadcast_capacity);
-            let entry = BossEntry {
-                boss,
-                history: RwLock::new(CircularQueue::with_capacity(history_size)),
-                broadcast: tx,
-            };
-
-            this.insert(&Arc::new(entry));
-        }
-
+        this.update_vec();
         this
     }
 
@@ -287,8 +290,7 @@ impl RaidHandlerInner {
     }
 
     pub fn update_image_hash(&self, boss_name: &BossName, image_hash: ImageHash) {
-        let guard_opt = self.bosses.get(boss_name);
-        let guard = match guard_opt {
+        let guard = match self.bosses.get(boss_name) {
             Some(g) => g,
             None => return,
         };
