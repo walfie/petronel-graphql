@@ -54,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
     bosses_to_request_hashes_for
         .iter()
         .for_each(|boss| hash_inbox.request_hash_for_boss(boss));
+    tokio::spawn(hash_worker);
 
     // Cleanup task that periodically:
     // * removes bosses that haven't been seen in a while
@@ -132,10 +133,6 @@ async fn main() -> anyhow::Result<()> {
     let server = tokio::spawn(warp::serve(routes).try_bind(bind_addr));
 
     tokio::select! {
-        // For some reason the `hash_worker` doesn't work consistently if started with `tokio::spawn`
-        _ = hash_worker => {
-            slog::error!(log, "Hash updater ended unexpectedly");
-        }
         _ = twitter_worker => {
             slog::error!(log, "Disconnected from Twitter stream");
         }
