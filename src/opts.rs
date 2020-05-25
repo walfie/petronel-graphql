@@ -72,14 +72,35 @@ pub struct Options {
 
     /// How often to flush boss data to persistent filesystem storage
     ///
-    /// This will only take effect if `--storage-file-path` is specified
+    /// This will only take effect if `--storage-file-path` is specified.
     #[structopt(long, env, default_value = "10m", parse(try_from_str = parse_duration))]
     pub storage_file_flush_interval: Duration,
 
-    // TODO: Add note on which takes precedence if redis is specified
     /// JSON file to read/write boss data to
+    ///
+    /// If `--storage-redis-uri` is specified, Redis takes precedence for loading on startup.
     #[structopt(long, env)]
     pub storage_file_path: Option<String>,
+
+    /// How often to flush boss data to Redis storage
+    ///
+    /// This will only take effect if `--storage-redis-uri` is specified.
+    #[structopt(long, env, default_value = "10m", parse(try_from_str = parse_duration))]
+    pub storage_redis_flush_interval: Duration,
+
+    /// Redis URI to read/write boss data to
+    ///
+    /// URI format: redis://[:<passwd>@]<hostname>[:port][/<db>]
+    ///
+    /// If `--storage-file-path` is specified, Redis takes precedence for loading on startup.
+    #[structopt(long, env)]
+    pub storage_redis_uri: Option<String>,
+
+    /// Redis key to use for boss data
+    ///
+    /// Takes effect only if `--storage-redis-uri` is specified
+    #[structopt(long, env, default_value = "petronel:bosses")]
+    pub storage_redis_key: String,
 
     /// Bosses not seen for this long will be removed during cleanup tasks
     ///

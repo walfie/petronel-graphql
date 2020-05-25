@@ -7,7 +7,7 @@ use chrono::Utc;
 use futures::stream::StreamExt;
 use petronel_graphql::image_hash::HyperImageHasher;
 use petronel_graphql::model::Boss;
-use petronel_graphql::persistence::{JsonFile, Persistence};
+use petronel_graphql::persistence::{JsonFile, Persistence, Redis};
 use petronel_graphql::{image_hash, twitter, RaidHandler};
 use structopt::StructOpt;
 
@@ -23,24 +23,31 @@ async fn main() -> anyhow::Result<()> {
     let client = hyper::Client::builder().build::<_, hyper::Body>(conn);
 
     // Get boss list from cache
-    let initial_bosses = get_initial_bosses(&log, &opt.clone()).await?;
+    let json_file = opt.storage_file_path.map(JsonFile::new);
+    let redis_client = match opt.storage_redis_uri {
+        None => None,
+        Some(uri) => match Redis::new(uri, opt.storage_redis_key).await {
+            Ok(client) => Some(client),
+            Err(e) => {
+                slog::warn!(log, "Failed to connect to Redis"; "error" => %e);
+                None
+            }
+        },
+    };
+
+    let initial_bosses =
+        get_initial_bosses(&log, json_file.as_ref(), redis_client.as_ref()).await?;
     let bosses_to_request_hashes_for = initial_bosses
         .iter()
         .filter(|b| b.needs_image_hash_update())
         .cloned()
         .collect::<Vec<_>>();
 
+    // Initialize boss handler
     let raid_handler = RaidHandler::new(
         initial_bosses,
         opt.raid_history_size,
         opt.broadcast_capacity,
-    );
-
-    let token = twitter::Token::new(
-        opt.consumer_key,
-        opt.consumer_secret,
-        opt.access_token,
-        opt.access_token_secret,
     );
 
     // Fetch boss images and calculate image hashes
@@ -82,10 +89,8 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Periodically write boss data to persistent storage
-    if let Some(path) = opt.storage_file_path {
-        let file = JsonFile::new(path);
-
+    // Periodically write boss data to JSON file
+    if let Some(file) = json_file {
         tokio::spawn({
             let log = log.clone();
             let mut interval = tokio::time::interval(opt.storage_file_flush_interval);
@@ -99,12 +104,12 @@ async fn main() -> anyhow::Result<()> {
                     let bosses = guard.iter().map(|entry| entry.boss()).collect::<Vec<_>>();
                     if let Err(e) = file.save_bosses(&bosses).await {
                         slog::warn!(
-                            log, "Failed to write boss data to file";
+                            log, "Failed to save boss data to file";
                             "error" => %e, "path" => file.path()
                         )
                     } else {
                         slog::debug!(
-                            log, "Saved bosses to file";
+                            log, "Saved boss data to file";
                             "path" => file.path(), "count" => bosses.len()
                         );
                     }
@@ -113,6 +118,36 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Periodically write boss data to Redis
+    if let Some(redis) = redis_client {
+        tokio::spawn({
+            let log = log.clone();
+            let mut interval = tokio::time::interval(opt.storage_redis_flush_interval);
+            let raid_handler = raid_handler.clone();
+
+            async move {
+                interval.tick().await; // The first tick completes immediately
+                loop {
+                    interval.tick().await;
+                    let guard = raid_handler.bosses();
+                    let bosses = guard.iter().map(|entry| entry.boss()).collect::<Vec<_>>();
+                    if let Err(e) = redis.save_bosses(&bosses).await {
+                        slog::warn!(log, "Failed to save boss data to Redis"; "error" => %e)
+                    } else {
+                        slog::debug!(log, "Saved boss data to Redis"; "count" => bosses.len());
+                    }
+                }
+            }
+        });
+    };
+
+    // Start Twitter stream
+    let token = twitter::Token::new(
+        opt.consumer_key,
+        opt.consumer_secret,
+        opt.access_token,
+        opt.access_token_secret,
+    );
     let (mut tweet_stream, twitter_worker) = twitter::connect_with_retries(
         log.clone(),
         client,
@@ -128,6 +163,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Start HTTP listeners
     slog::info!(log, "Starting HTTP server"; "port" => opt.port, "ip" => &opt.bind_ip);
     let server = tokio::spawn(warp::serve(routes).try_bind(bind_addr));
 
@@ -146,27 +182,56 @@ async fn main() -> anyhow::Result<()> {
     anyhow::bail!("could not start");
 }
 
-async fn get_initial_bosses(log: &slog::Logger, opt: &opts::Options) -> anyhow::Result<Vec<Boss>> {
-    let mut bosses = if let Some(path) = &opt.storage_file_path {
-        let file = JsonFile::new(path.clone());
-        match file.get_bosses().await {
-            Ok(bosses) => {
-                slog::info!(
-                    log, "Loaded bosses from file";
-                    "path" => file.path(), "count" => bosses.len()
-                );
-                bosses
-            }
-            Err(e) => {
-                slog::warn!(
-                    log, "Failed to load bosses from file. Initializing with empty list.";
-                    "error" => %e, "path" => file.path()
-                );
-                Vec::new()
-            }
+async fn try_bosses_from_file(
+    log: &slog::Logger,
+    json_file: Option<&JsonFile>,
+) -> Option<Vec<Boss>> {
+    let json_file = json_file?;
+    match json_file.get_bosses().await {
+        Ok(bosses) => {
+            slog::info!(
+                log, "Loaded bosses from JSON file";
+                "path" => json_file.path(), "count" => bosses.len()
+            );
+            Some(bosses)
         }
-    } else {
-        Vec::new()
+        Err(e) => {
+            slog::warn!(
+                log, "Failed to load bosses from JSON file";
+                "error" => %e, "path" => json_file.path()
+            );
+            None
+        }
+    }
+}
+
+async fn try_bosses_from_redis(log: &slog::Logger, redis: Option<&Redis>) -> Option<Vec<Boss>> {
+    let redis = redis?;
+    match redis.get_bosses().await {
+        Ok(bosses) => {
+            slog::info!(log, "Loaded bosses from Redis"; "count" => bosses.len());
+            Some(bosses)
+        }
+        Err(e) => {
+            slog::warn!(log, "Failed to load bosses from Redis"; "error" => %e);
+            None
+        }
+    }
+}
+
+async fn get_initial_bosses(
+    log: &slog::Logger,
+    json_file: Option<&JsonFile>,
+    redis_client: Option<&Redis>,
+) -> anyhow::Result<Vec<Boss>> {
+    let mut bosses = match try_bosses_from_redis(log, redis_client).await {
+        Some(bosses) => bosses,
+        None => try_bosses_from_file(log, json_file)
+            .await
+            .unwrap_or_else(|| {
+                slog::info!(log, "Initializing empty boss list");
+                Vec::new()
+            }),
     };
 
     // See comment on `Boss::LVL_120_MEDUSA` for the reasoning

@@ -387,6 +387,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a475fc4af42d83d28adf72968d9bcfaf035a1a9381642d8e85d8a04957767b0d"
 
 [[package]]
+name = "combine"
+version = "4.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8e5ef862b2df927249f4e2bdc29c1bd13a33105f900884b0c32acdf32aff584"
+dependencies = [
+ "bytes 0.5.4",
+ "futures-util",
+ "memchr",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1477,6 +1490,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "pin-project-lite",
+ "redis",
  "regex",
  "serde",
  "serde_json",
@@ -1488,7 +1502,6 @@ dependencies = [
  "structopt",
  "thiserror",
  "tokio",
- "tokio-test",
  "twitter-stream",
  "warp",
 ]
@@ -1857,6 +1870,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "678054eb77286b51581ba43620cc911abf02758c91f93f479767aed0f90458b2"
 dependencies = [
  "rand_core 0.3.1",
+]
+
+[[package]]
+name = "redis"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b94c6247d45d78d24481a5b7aca146f414ec0f5e39e175f294d1876b943eeeb"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "bytes 0.5.4",
+ "combine",
+ "dtoa",
+ "futures",
+ "futures-util",
+ "itoa",
+ "percent-encoding 2.1.0",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
+ "url",
 ]
 
 [[package]]
@@ -2355,17 +2389,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "tokio-test"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed0049c119b6d505c4447f5c64873636c7af6c75ab0d45fd9f618d82acb8016d"
-dependencies = [
- "bytes 0.5.4",
- "futures-core",
- "tokio",
 ]
 
 [[package]]

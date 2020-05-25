@@ -23,4 +23,6 @@ pub enum Error {
     BindPort(#[from] std::net::AddrParseError),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Redis error: {0}")]
+    Redis(#[from] redis::RedisError),
 }
