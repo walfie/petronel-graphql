@@ -67,11 +67,13 @@ pub struct Options {
     ///
     /// This includes removing outdated bosses, removing broadcast channels for unknown bosses with
     /// no subscribers, etc.
-    #[structopt(long, env, default_value = "5m", parse(try_from_str = parse_duration))]
+    #[structopt(long, env, default_value = "15m", parse(try_from_str = parse_duration))]
     pub cleanup_interval: Duration,
 
     /// How often to flush boss data to persistent filesystem storage
-    #[structopt(long, env, default_value = "5m", parse(try_from_str = parse_duration))]
+    ///
+    /// This will only take effect if `--storage-file-path` is specified
+    #[structopt(long, env, default_value = "10m", parse(try_from_str = parse_duration))]
     pub storage_file_flush_interval: Duration,
 
     // TODO: Add note on which takes precedence if redis is specified

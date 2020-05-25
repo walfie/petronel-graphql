@@ -56,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
         .for_each(|boss| hash_inbox.request_hash_for_boss(boss));
     tokio::spawn(hash_worker);
 
-    // Cleanup task that periodically:
+    // Cleanup task that runs on startup and periodically:
     // * removes bosses that haven't been seen in a while
     // * drops broadcast channels for bosses that don't exist and have no subscribers
     // * requests image hashes for bosses that have an image but no hash
@@ -67,7 +67,6 @@ async fn main() -> anyhow::Result<()> {
         let mut interval = tokio::time::interval(opt.cleanup_interval);
 
         async move {
-            interval.tick().await; // The first tick completes immediately
             loop {
                 interval.tick().await;
                 let long_ago = Utc::now() - ttl;
