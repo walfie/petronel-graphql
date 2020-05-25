@@ -106,10 +106,6 @@ impl BossEntry {
     pub fn history(&self) -> &RwLock<CircularQueue<Arc<Raid>>> {
         &self.history
     }
-
-    fn for_each_key(&self, f: impl FnMut(&BossName)) {
-        self.boss.name.for_each(f)
-    }
 }
 
 pub struct Bosses(arc_swap::Guard<'static, Arc<Vec<Arc<BossEntry>>>>);
@@ -155,7 +151,10 @@ impl BossMap {
                 broadcast: tx,
             });
 
-            entry.for_each_key(|key| init.push((key.clone(), entry.clone())));
+            entry
+                .boss
+                .name
+                .for_each(|name| init.push((name.clone(), entry.clone())));
         }
 
         let this = Self {
@@ -209,9 +208,9 @@ impl BossMap {
     }
 
     fn insert(&self, entry: &Arc<BossEntry>) {
-        entry.for_each_key(|key| {
-            self.map.insert(key.clone(), entry.clone());
-            self.waiting.remove(&key);
+        entry.boss.name.for_each(|name| {
+            self.map.insert(name.clone(), entry.clone());
+            self.waiting.remove(&name);
         });
 
         self.update_vec();
