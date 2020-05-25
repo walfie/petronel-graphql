@@ -2,6 +2,7 @@ mod log;
 mod opts;
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use chrono::Utc;
 use futures::stream::StreamExt;
@@ -91,54 +92,34 @@ async fn main() -> anyhow::Result<()> {
 
     // Periodically write boss data to JSON file
     if let Some(file) = json_file {
-        tokio::spawn({
-            let log = log.clone();
-            let mut interval = tokio::time::interval(opt.storage_file_flush_interval);
-            let raid_handler = raid_handler.clone();
-
-            async move {
-                interval.tick().await; // The first tick completes immediately
-                loop {
-                    interval.tick().await;
-                    let guard = raid_handler.bosses();
-                    let bosses = guard.iter().map(|entry| entry.boss()).collect::<Vec<_>>();
-                    if let Err(e) = file.save_bosses(&bosses).await {
-                        slog::warn!(
-                            log, "Failed to save boss data to file";
-                            "error" => %e, "path" => file.path()
-                        )
-                    } else {
-                        slog::debug!(
-                            log, "Saved boss data to file";
-                            "path" => file.path(), "count" => bosses.len()
-                        );
-                    }
+        let log = log.clone();
+        tokio::spawn(save_bosses(
+            raid_handler.clone(),
+            file,
+            opt.storage_file_flush_interval,
+            move |file, result| match result {
+                Ok(count) => {
+                    slog::debug!(log, "Saved boss data to file"; "path" => file.path(), "count" => count)
                 }
-            }
-        });
+                Err(e) => {
+                    slog::warn!(log, "Failed to save boss data to file"; "error" => %e, "path" => file.path())
+                }
+            },
+        ));
     }
 
     // Periodically write boss data to Redis
     if let Some(redis) = redis_client {
-        tokio::spawn({
-            let log = log.clone();
-            let mut interval = tokio::time::interval(opt.storage_redis_flush_interval);
-            let raid_handler = raid_handler.clone();
-
-            async move {
-                interval.tick().await; // The first tick completes immediately
-                loop {
-                    interval.tick().await;
-                    let guard = raid_handler.bosses();
-                    let bosses = guard.iter().map(|entry| entry.boss()).collect::<Vec<_>>();
-                    if let Err(e) = redis.save_bosses(&bosses).await {
-                        slog::warn!(log, "Failed to save boss data to Redis"; "error" => %e)
-                    } else {
-                        slog::debug!(log, "Saved boss data to Redis"; "count" => bosses.len());
-                    }
-                }
-            }
-        });
+        let log = log.clone();
+        tokio::spawn(save_bosses(
+            raid_handler.clone(),
+            redis,
+            opt.storage_redis_flush_interval,
+            move |_, result| match result {
+                Ok(count) => slog::debug!(log, "Saved boss data to Redis"; "count" => count),
+                Err(e) => slog::warn!(log, "Failed to save boss data to Redis"; "error" => %e),
+            },
+        ));
     };
 
     // Start Twitter stream
@@ -182,48 +163,70 @@ async fn main() -> anyhow::Result<()> {
     anyhow::bail!("could not start");
 }
 
-async fn try_bosses_from_file(
-    log: &slog::Logger,
-    json_file: Option<&JsonFile>,
-) -> Option<Vec<Boss>> {
-    let json_file = json_file?;
-    match json_file.get_bosses().await {
-        Ok(bosses) => {
-            slog::info!(
-                log, "Loaded bosses from JSON file";
-                "path" => json_file.path(), "count" => bosses.len()
-            );
-            Some(bosses)
-        }
-        Err(e) => {
-            slog::warn!(
-                log, "Failed to load bosses from JSON file";
-                "error" => %e, "path" => json_file.path()
-            );
-            None
-        }
+async fn save_bosses<P: Persistence>(
+    raid_handler: RaidHandler,
+    persistence: P,
+    interval: Duration,
+    mut on_complete: impl FnMut(&P, Result<usize, P::Error>),
+) {
+    let mut interval = tokio::time::interval(interval);
+    interval.tick().await; // The first tick completes immediately
+    loop {
+        interval.tick().await;
+        let guard = raid_handler.bosses();
+        let bosses = guard.iter().map(|entry| entry.boss()).collect::<Vec<_>>();
+
+        let result = persistence.save_bosses(&bosses).await;
+        on_complete(&persistence, result.map(|()| bosses.len()));
     }
 }
 
-async fn try_bosses_from_redis(log: &slog::Logger, redis: Option<&Redis>) -> Option<Vec<Boss>> {
-    let redis = redis?;
-    match redis.get_bosses().await {
-        Ok(bosses) => {
-            slog::info!(log, "Loaded bosses from Redis"; "count" => bosses.len());
-            Some(bosses)
-        }
-        Err(e) => {
-            slog::warn!(log, "Failed to load bosses from Redis"; "error" => %e);
-            None
-        }
-    }
-}
-
+// Loader order:
+// 1. Try loading from Redis (if available)
+// 2. Try loading from JSON file (if available)
+// 3. Default to empty list
 async fn get_initial_bosses(
     log: &slog::Logger,
     json_file: Option<&JsonFile>,
     redis_client: Option<&Redis>,
 ) -> anyhow::Result<Vec<Boss>> {
+    async fn try_bosses_from_file(
+        log: &slog::Logger,
+        json_file: Option<&JsonFile>,
+    ) -> Option<Vec<Boss>> {
+        let json_file = json_file?;
+        match json_file.get_bosses().await {
+            Ok(bosses) => {
+                slog::info!(
+                    log, "Loaded bosses from JSON file";
+                    "path" => json_file.path(), "count" => bosses.len()
+                );
+                Some(bosses)
+            }
+            Err(e) => {
+                slog::warn!(
+                    log, "Failed to load bosses from JSON file";
+                    "error" => %e, "path" => json_file.path()
+                );
+                None
+            }
+        }
+    }
+
+    async fn try_bosses_from_redis(log: &slog::Logger, redis: Option<&Redis>) -> Option<Vec<Boss>> {
+        let redis = redis?;
+        match redis.get_bosses().await {
+            Ok(bosses) => {
+                slog::info!(log, "Loaded bosses from Redis"; "count" => bosses.len());
+                Some(bosses)
+            }
+            Err(e) => {
+                slog::warn!(log, "Failed to load bosses from Redis"; "error" => %e);
+                None
+            }
+        }
+    }
+
     let mut bosses = match try_bosses_from_redis(log, redis_client).await {
         Some(bosses) => bosses,
         None => try_bosses_from_file(log, json_file)
