@@ -49,6 +49,7 @@ impl fmt::Display for PrometheusMetric {
     }
 }
 
+#[derive(Debug)]
 pub struct PrometheusMetricFactory {
     prefix: String,
     boss_tweet_counter_header: String,

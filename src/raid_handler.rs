@@ -3,6 +3,9 @@ use std::pin::Pin;
 use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 
+use crate::metrics::{
+    LangMetric, Metric, MetricFactory, Metrics, PrometheusMetric, PrometheusMetricFactory,
+};
 use crate::model::{Boss, BossName, CachedString, ImageHash, Raid};
 
 use arc_swap::ArcSwap;
@@ -47,8 +50,14 @@ impl Stream for Subscription {
 }
 
 impl RaidHandler {
-    pub fn new(bosses: Vec<Boss>, history_size: usize, broadcast_capacity: usize) -> Self {
+    pub fn new(
+        metric_factory: PrometheusMetricFactory,
+        bosses: Vec<Boss>,
+        history_size: usize,
+        broadcast_capacity: usize,
+    ) -> Self {
         Self(Arc::new(RaidHandlerInner::new(
+            metric_factory,
             bosses,
             history_size,
             broadcast_capacity,
@@ -79,6 +88,8 @@ pub struct BossEntry {
     boss: Boss,
     history: RwLock<CircularQueue<Arc<Raid>>>,
     broadcast: broadcast::Sender<Arc<Raid>>,
+    tweet_count: LangMetric<PrometheusMetric>,
+    subscriber_count: PrometheusMetric,
 }
 
 impl Clone for BossEntry {
@@ -91,6 +102,8 @@ impl Clone for BossEntry {
             boss,
             history,
             broadcast: self.broadcast.clone(),
+            tweet_count: self.tweet_count.clone(),
+            subscriber_count: self.subscriber_count.clone(),
         }
     }
 }
@@ -119,6 +132,7 @@ impl Deref for Bosses {
 
 #[derive(Debug)]
 pub struct RaidHandlerInner {
+    metric_factory: PrometheusMetricFactory,
     bosses: BossMap,
     boss_broadcast: broadcast::Sender<Weak<BossEntry>>,
     history_size: usize,
@@ -137,7 +151,12 @@ struct BossMap {
 }
 
 impl BossMap {
-    fn new(mut bosses: Vec<Boss>, history_size: usize, broadcast_capacity: usize) -> Self {
+    fn new(
+        metric_factory: &PrometheusMetricFactory,
+        mut bosses: Vec<Boss>,
+        history_size: usize,
+        broadcast_capacity: usize,
+    ) -> Self {
         bosses.sort_by_key(|boss| boss.name.canonical().cloned());
         bosses.dedup_by(|a, b| a.name == b.name);
 
@@ -146,9 +165,11 @@ impl BossMap {
         for boss in bosses {
             let (tx, _) = broadcast::channel(broadcast_capacity);
             let entry = Arc::new(BossEntry {
-                boss,
                 history: RwLock::new(CircularQueue::with_capacity(history_size)),
                 broadcast: tx,
+                tweet_count: metric_factory.boss_tweet_counter(&boss.name),
+                subscriber_count: metric_factory.boss_subscriber_gauge(&boss.name),
+                boss,
             });
 
             entry
@@ -228,7 +249,11 @@ impl BossMap {
         }
     }
 
-    fn new_entry_from_raid(&self, raid: Raid) -> Arc<BossEntry> {
+    fn new_entry_from_raid(
+        &self,
+        metric_factory: &PrometheusMetricFactory,
+        raid: Raid,
+    ) -> Arc<BossEntry> {
         let boss = Boss::from(&raid);
         let broadcast = if let Some(tx) = self.waiting.remove_take(&raid.boss_name) {
             tx.value().clone()
@@ -238,9 +263,11 @@ impl BossMap {
         };
 
         let entry = BossEntry {
-            boss,
             history: RwLock::new(CircularQueue::with_capacity(self.history_size)),
             broadcast,
+            tweet_count: metric_factory.boss_tweet_counter(&boss.name),
+            subscriber_count: metric_factory.boss_subscriber_gauge(&boss.name),
+            boss,
         };
 
         let raid = Arc::new(raid);
@@ -254,15 +281,20 @@ impl BossMap {
 }
 
 impl RaidHandlerInner {
-    // TODO: Prometheus metrics
-    fn new(bosses: Vec<Boss>, history_size: usize, broadcast_capacity: usize) -> Self {
+    fn new(
+        metric_factory: PrometheusMetricFactory,
+        bosses: Vec<Boss>,
+        history_size: usize,
+        broadcast_capacity: usize,
+    ) -> Self {
         let (tx, _) = broadcast::channel(broadcast_capacity);
 
         Self {
-            bosses: BossMap::new(bosses, history_size, broadcast_capacity),
+            bosses: BossMap::new(&metric_factory, bosses, history_size, broadcast_capacity),
             boss_broadcast: tx,
             history_size,
             broadcast_capacity,
+            metric_factory,
         }
     }
 
@@ -286,6 +318,23 @@ impl RaidHandlerInner {
 
     pub fn bosses(&self) -> Bosses {
         Bosses(self.bosses.as_vec().load())
+    }
+
+    pub fn metrics(&self) -> <PrometheusMetricFactory as MetricFactory>::Output {
+        let bosses = self.bosses();
+
+        let mut metrics = Metrics {
+            boss_tweet_counters: Vec::with_capacity(bosses.len()),
+            boss_subscriber_gauges: Vec::with_capacity(bosses.len()),
+        };
+
+        for boss in bosses.iter() {
+            metrics.boss_tweet_counters.push(&boss.tweet_count);
+            boss.subscriber_count.set(boss.broadcast.receiver_count());
+            metrics.boss_subscriber_gauges.push(&boss.subscriber_count);
+        }
+
+        self.metric_factory.write(&metrics)
     }
 
     pub fn update_image_hash(&self, boss_name: &BossName, image_hash: ImageHash) {
@@ -346,9 +395,11 @@ impl RaidHandlerInner {
                 .for_each(|raid| new_history.push(raid));
 
             let new_entry = Arc::new(BossEntry {
-                boss: merged_boss,
                 history: RwLock::new(new_history),
                 broadcast: entry_to_keep.broadcast.clone(),
+                tweet_count: self.metric_factory.boss_tweet_counter(&merged_boss.name),
+                subscriber_count: self.metric_factory.boss_subscriber_gauge(&merged_boss.name),
+                boss: merged_boss,
             });
 
             self.bosses.insert(&new_entry);
@@ -373,6 +424,9 @@ impl RaidHandlerInner {
             let _ = entry.broadcast.send(raid.clone());
             entry.history.write().push(raid.clone());
 
+            // Update metrics
+            entry.tweet_count.get(raid.language).inc();
+
             // If the incoming raid has an image URL but the existing boss doesn't, update the image
             if entry.boss.image.get(raid.language).is_none() && raid.image_url.is_some() {
                 // Update the existing entry with a new hash
@@ -387,7 +441,7 @@ impl RaidHandlerInner {
                 let _ = self.boss_broadcast.send(Arc::downgrade(&new_entry));
             }
         } else {
-            let entry = self.bosses.new_entry_from_raid(raid);
+            let entry = self.bosses.new_entry_from_raid(&self.metric_factory, raid);
             let _ = self.boss_broadcast.send(Arc::downgrade(&entry));
         }
     }
@@ -426,8 +480,10 @@ mod test {
 
         let history_size = 2;
         let broadcast_capacity = 10;
+        let metric_factory = PrometheusMetricFactory::new("petronel".to_owned());
 
-        let handler = RaidHandler::new(Vec::new(), history_size, broadcast_capacity);
+        let handler =
+            RaidHandler::new(metric_factory, Vec::new(), history_size, broadcast_capacity);
 
         let mut subscriber_ja = handler.subscribe(BOSS_NAME_JA.clone());
         let mut subscriber_en = handler.subscribe(BOSS_NAME_EN.clone());

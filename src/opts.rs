@@ -43,6 +43,10 @@ pub struct Options {
     #[structopt(long, env)]
     pub json_logs: bool,
 
+    /// Prefix for Prometheus metric names (without trailing underscore)
+    #[structopt(long, env, default_value = "petronel")]
+    pub prometheus_prefix: String,
+
     /// If disconnected from the Twitter streaming API, wait this long before reconnecting
     #[structopt(long, env, default_value = "10s", parse(try_from_str = parse_duration))]
     pub connection_retry_delay: Duration,

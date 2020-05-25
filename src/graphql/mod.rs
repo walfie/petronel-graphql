@@ -12,7 +12,7 @@ pub fn routes(
     handler: RaidHandler,
 ) -> impl Filter<Extract = impl warp::Reply, Error = Infallible> + Clone {
     let schema = Schema::build(schema::QueryRoot, EmptyMutation, schema::SubscriptionRoot)
-        .data(handler)
+        .data(handler.clone())
         .finish();
 
     let post_graphql = warp::path!("graphql")
@@ -38,6 +38,13 @@ pub fn routes(
     });
 
     // TODO: Configurable
+    let get_metrics = warp::path!("metrics").and(warp::get()).map(move || {
+        Response::builder()
+            .header("content-type", "text/plain; version=0.0.4")
+            .body(handler.metrics())
+    });
+
+    // TODO: Configurable
     let cors = warp::cors()
         .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
@@ -47,6 +54,7 @@ pub fn routes(
     let routes = post_graphql
         .or(websocket_graphql)
         .or(get_graphiql)
+        .or(get_metrics)
         .with(cors)
         .recover(|err: Rejection| async move {
             if let Some(BadRequest(err)) = err.find() {

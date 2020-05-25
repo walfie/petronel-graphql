@@ -7,6 +7,7 @@ use std::time::Duration;
 use chrono::Utc;
 use futures::stream::StreamExt;
 use petronel_graphql::image_hash::HyperImageHasher;
+use petronel_graphql::metrics::PrometheusMetricFactory;
 use petronel_graphql::model::Boss;
 use petronel_graphql::persistence::{JsonFile, Persistence, Redis};
 use petronel_graphql::{image_hash, twitter, RaidHandler};
@@ -46,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize boss handler
     let raid_handler = RaidHandler::new(
+        PrometheusMetricFactory::new(opt.prometheus_prefix),
         initial_bosses,
         opt.raid_history_size,
         opt.broadcast_capacity,
