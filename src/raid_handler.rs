@@ -223,7 +223,7 @@ impl BossMap {
         } else if let Some(guard) = self.waiting.get(key) {
             guard.value().subscribe()
         } else {
-            let (tx, rx) = broadcast::channel(1);
+            let (tx, rx) = broadcast::channel(self.broadcast_capacity);
             self.waiting.insert(key.into(), tx);
             rx
         }
