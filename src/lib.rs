@@ -1,6 +1,7 @@
 pub mod error;
 pub mod graphql;
 pub mod image_hash;
+pub mod metrics;
 pub mod model;
 pub mod persistence;
 mod raid_handler;

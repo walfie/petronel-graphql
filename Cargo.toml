@@ -42,6 +42,7 @@ features = ["full", "sync", "time", "stream", "parking_lot", "rt-threaded"]
 
 [dev-dependencies]
 itertools = "0.9.0"
+indoc = "0.3.5"
 maplit = "1.0.2"
 
 [features]

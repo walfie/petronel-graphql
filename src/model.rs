@@ -69,6 +69,13 @@ pub enum Language {
 
 impl Language {
     pub const VALUES: &'static [Language] = &[Self::Japanese, Self::English];
+
+    pub fn as_metric_label(&self) -> &'static str {
+        match self {
+            Self::Japanese => "ja",
+            Self::English => "en",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
