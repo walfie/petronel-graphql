@@ -35,6 +35,7 @@ structopt = "0.3.14"
 thiserror = "1.0.16"
 twitter-stream = "0.10.0-alpha.6"
 warp = "0.2.2"
+base64 = "0.12.1"
 
 [dependencies.tokio]
 version = "0.2.21"
