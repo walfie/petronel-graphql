@@ -389,7 +389,7 @@ impl RaidHandlerInner {
                 .cloned()
                 .collect::<Vec<_>>();
             combined_history.extend(entry_to_keep.history.read().asc_iter().cloned());
-            combined_history.sort_by_key(|raid| raid.created_at);
+            combined_history.sort_by_key(|raid| *raid.created_at.as_datetime());
             combined_history
                 .drain(..)
                 .for_each(|raid| new_history.push(raid));
@@ -416,7 +416,10 @@ impl RaidHandlerInner {
         if let Some(guard) = self.bosses.get(&raid.boss_name) {
             let entry = guard.value();
 
-            entry.boss.last_seen_at.replace(&raid.created_at);
+            entry
+                .boss
+                .last_seen_at
+                .replace(raid.created_at.as_datetime());
 
             let raid = Arc::new(raid);
 
@@ -493,7 +496,8 @@ mod test {
             let mut raid = raid.clone();
             raid.tweet_id += 1;
             raid.id = raid.tweet_id.to_string().into();
-            raid.created_at = raid.created_at + chrono::Duration::seconds(1);
+            raid.created_at =
+                (raid.created_at.as_datetime().clone() + chrono::Duration::seconds(1)).into();
             raid.language = language;
             raid.boss_name = match language {
                 Japanese => BOSS_NAME_JA.clone(),
@@ -508,7 +512,7 @@ mod test {
             user_name: "walfieee".into(),
             user_image: None,
             boss_name: BOSS_NAME_JA.clone(),
-            created_at: Utc.ymd(2020, 5, 20).and_hms(1, 2, 3),
+            created_at: Utc.ymd(2020, 5, 20).and_hms(1, 2, 3).into(),
             text: Some("Help".into()),
             language: Language::Japanese,
             image_url: None,

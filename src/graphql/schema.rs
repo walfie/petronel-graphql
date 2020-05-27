@@ -102,11 +102,11 @@ impl Raid {
         self.text.as_deref()
     }
 
-    // TODO: Add separate field for timestamp as milliseconds
+    // TODO: Add scalar type for DateTime as string
     /// Tweet creation date
     #[field(name = "createdAt")]
-    async fn created_at(&self) -> DateTime {
-        self.created_at
+    async fn created_at(&self) -> &str {
+        self.created_at.as_str()
     }
 
     /// Twitter username

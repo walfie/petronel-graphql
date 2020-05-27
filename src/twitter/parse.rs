@@ -145,7 +145,7 @@ impl TryFrom<Tweet> for Raid {
             user_name: tweet.user.screen_name.into(),
             user_image,
             text: parsed.text.map(Cow::into_owned),
-            created_at: tweet.created_at,
+            created_at: tweet.created_at.into(),
             language: parsed.language,
             image_url: tweet.entities.media.map(|media| media.media_url_https),
         };

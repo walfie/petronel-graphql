@@ -55,10 +55,56 @@ pub struct Raid {
     // Include the full URL as a separate graphql field if requested.
     pub user_image: Option<String>,
     pub boss_name: BossName,
-    pub created_at: DateTime,
+    pub created_at: DateTimeString,
     pub text: Option<String>,
     pub language: Language,
     pub image_url: Option<CachedString>,
+}
+
+// A premature optimization to avoid needing to stringify a `DateTime` multiple times
+#[derive(Debug, Clone)]
+pub struct DateTimeString {
+    string: String,
+    datetime: DateTime,
+}
+
+impl DateTimeString {
+    pub fn as_str(&self) -> &str {
+        &self.string
+    }
+
+    pub fn as_datetime(&self) -> &DateTime {
+        &self.datetime
+    }
+}
+
+impl PartialEq for DateTimeString {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_datetime() == other.as_datetime()
+    }
+}
+
+impl Eq for DateTimeString {}
+
+impl PartialOrd for DateTimeString {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.as_datetime().partial_cmp(other.as_datetime())
+    }
+}
+
+impl Ord for DateTimeString {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.as_datetime().cmp(other.as_datetime())
+    }
+}
+
+impl From<DateTime> for DateTimeString {
+    fn from(value: DateTime) -> Self {
+        Self {
+            string: value.to_string(),
+            datetime: value,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -246,7 +292,7 @@ impl From<&Raid> for Boss {
             image_hash: None,
             level: parse_level(&raid.boss_name),
             name: LangString::new(lang, raid.boss_name.clone()),
-            last_seen_at: (&raid.created_at).into(),
+            last_seen_at: raid.created_at.as_datetime().into(),
         }
     }
 }
