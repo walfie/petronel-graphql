@@ -8,37 +8,6 @@ use async_graphql as gql;
 use async_graphql::Context;
 use futures::stream::Stream;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Id {
-    Boss(BossName),
-}
-
-impl ToString for Id {
-    fn to_string(&self) -> String {
-        let string_to_encode = match self {
-            Id::Boss(name) => format!("boss:{}", name),
-        };
-        base64::encode_config(&string_to_encode, base64::URL_SAFE_NO_PAD)
-    }
-}
-
-impl str::FromStr for Id {
-    type Err = ();
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let bytes = base64::decode_config(input, base64::URL_SAFE_NO_PAD).map_err(|_| ())?;
-        let decoded = str::from_utf8(&bytes).map_err(|_| ())?;
-
-        let mut parts = decoded.splitn(2, ':');
-        match (parts.next(), parts.next()) {
-            (Some("boss"), Some(id)) => Ok(Id::Boss(id.into())),
-            _ => Err(()),
-        }
-    }
-}
-
-impl Id {}
-
 pub struct SubscriptionRoot;
 
 #[gql::Subscription]
@@ -60,6 +29,12 @@ pub struct QueryRoot;
 
 #[gql::Object]
 impl QueryRoot {
+    async fn node(&self, ctx: &Context<'_>, id: String) -> Option<Arc<BossEntry>> {
+        match id.parse().ok()? {
+            NodeId::Boss(name) => ctx.data::<RaidHandler>().boss(&name),
+        }
+    }
+
     // TODO: pagination, first/last, etc
     async fn bosses(&self, ctx: &Context<'_>) -> Vec<Arc<BossEntry>> {
         ctx.data::<RaidHandler>().bosses().clone()
@@ -93,6 +68,11 @@ impl LangString {
 #[gql::Object]
 /// A raid boss
 impl BossEntry {
+    /// Node ID
+    async fn id(&self) -> &str {
+        self.node_id()
+    }
+
     /// Boss name
     async fn name(&self) -> &LangString {
         &self.boss().name
@@ -150,17 +130,5 @@ impl Raid {
     #[field(name = "icon")]
     async fn user_image(&self) -> Option<&str> {
         self.user_image.as_deref()
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn id() {
-        let id = Id::Boss("Lvl 60 Ozorotter".into());
-        assert_eq!(id.to_string().parse::<Id>().unwrap(), id);
-        assert_eq!("Ym9zczpMdmwgNjAgT3pvcm90dGVy".parse::<Id>().unwrap(), id);
     }
 }

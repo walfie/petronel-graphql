@@ -3,6 +3,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
+use std::str;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -13,6 +14,42 @@ pub type DateTime = chrono::DateTime<Utc>;
 pub type Level = i16;
 pub type TweetId = u64;
 pub type RaidId = String;
+
+// GraphQL Node ID
+#[derive(Debug, Clone, PartialEq)]
+pub enum NodeId {
+    Boss(BossName),
+}
+
+impl ToString for NodeId {
+    fn to_string(&self) -> String {
+        let string_to_encode = match self {
+            Self::Boss(name) => format!("boss:{}", name),
+        };
+        base64::encode_config(&string_to_encode, base64::URL_SAFE_NO_PAD)
+    }
+}
+
+impl str::FromStr for NodeId {
+    type Err = ();
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let bytes = base64::decode_config(input, base64::URL_SAFE_NO_PAD).map_err(|_| ())?;
+        let decoded = str::from_utf8(&bytes).map_err(|_| ())?;
+
+        let mut parts = decoded.splitn(2, ':');
+        match (parts.next(), parts.next()) {
+            (Some("boss"), Some(id)) => Ok(Self::Boss(id.into())),
+            _ => Err(()),
+        }
+    }
+}
+
+impl NodeId {
+    pub fn from_boss_name(name: &LangString) -> Self {
+        Self::Boss(name.canonical().cloned().unwrap_or_else(|| "".into()))
+    }
+}
 
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -341,5 +378,15 @@ mod test {
         };
 
         assert_eq!(json, boss);
+    }
+
+    #[test]
+    fn node_id() {
+        let id = NodeId::Boss("Lvl 60 Ozorotter".into());
+        assert_eq!(id.to_string().parse::<NodeId>().unwrap(), id);
+        assert_eq!(
+            "Ym9zczpMdmwgNjAgT3pvcm90dGVy".parse::<NodeId>().unwrap(),
+            id
+        );
     }
 }

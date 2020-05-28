@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 use crate::metrics::{
     LangMetric, Metric, MetricFactory, Metrics, PrometheusMetric, PrometheusMetricFactory,
 };
-use crate::model::{Boss, BossName, CachedString, ImageHash, Raid};
+use crate::model::{Boss, BossName, CachedString, ImageHash, NodeId, Raid};
 
 use arc_swap::ArcSwap;
 use circular_queue::CircularQueue;
@@ -85,6 +85,7 @@ impl Deref for RaidHandler {
 
 #[derive(Debug)]
 pub struct BossEntry {
+    node_id: CachedString,
     boss: Boss,
     history: RwLock<CircularQueue<Arc<Raid>>>,
     broadcast: broadcast::Sender<Arc<Raid>>,
@@ -99,6 +100,7 @@ impl Clone for BossEntry {
         let history = RwLock::new(self.history.read().clone());
 
         BossEntry {
+            node_id: self.node_id.clone(),
             boss,
             history,
             broadcast: self.broadcast.clone(),
@@ -109,6 +111,11 @@ impl Clone for BossEntry {
 }
 
 impl BossEntry {
+    #[inline]
+    pub fn node_id(&self) -> &CachedString {
+        &self.node_id
+    }
+
     #[inline]
     pub fn boss(&self) -> &Boss {
         &self.boss
@@ -165,6 +172,7 @@ impl BossMap {
         for boss in bosses {
             let (tx, _) = broadcast::channel(broadcast_capacity);
             let entry = Arc::new(BossEntry {
+                node_id: NodeId::from_boss_name(&boss.name).to_string().into(),
                 history: RwLock::new(CircularQueue::with_capacity(history_size)),
                 broadcast: tx,
                 tweet_count: metric_factory.boss_tweet_counter(&boss.name),
@@ -263,6 +271,7 @@ impl BossMap {
         };
 
         let entry = BossEntry {
+            node_id: NodeId::from_boss_name(&boss.name).to_string().into(),
             history: RwLock::new(CircularQueue::with_capacity(self.history_size)),
             broadcast,
             tweet_count: metric_factory.boss_tweet_counter(&boss.name),
@@ -395,6 +404,7 @@ impl RaidHandlerInner {
                 .for_each(|raid| new_history.push(raid));
 
             let new_entry = Arc::new(BossEntry {
+                node_id: NodeId::from_boss_name(&merged_boss.name).to_string().into(),
                 history: RwLock::new(new_history),
                 broadcast: entry_to_keep.broadcast.clone(),
                 tweet_count: self.metric_factory.boss_tweet_counter(&merged_boss.name),
