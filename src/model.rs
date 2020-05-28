@@ -26,7 +26,7 @@ impl ToString for NodeId {
         let string_to_encode = match self {
             Self::Boss(name) => format!("boss:{}", name),
         };
-        base64::encode_config(&string_to_encode, base64::URL_SAFE_NO_PAD)
+        bs58::encode(&string_to_encode).into_string()
     }
 }
 
@@ -34,7 +34,7 @@ impl str::FromStr for NodeId {
     type Err = ();
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let bytes = base64::decode_config(input, base64::URL_SAFE_NO_PAD).map_err(|_| ())?;
+        let bytes = bs58::decode(input).into_vec().map_err(|_| ())?;
         let decoded = str::from_utf8(&bytes).map_err(|_| ())?;
 
         let mut parts = decoded.splitn(2, ':');
@@ -385,7 +385,7 @@ mod test {
         let id = NodeId::Boss("Lvl 60 Ozorotter".into());
         assert_eq!(id.to_string().parse::<NodeId>().unwrap(), id);
         assert_eq!(
-            "Ym9zczpMdmwgNjAgT3pvcm90dGVy".parse::<NodeId>().unwrap(),
+            "7456rjyoQwqQfRqRH2mGW7W2S67e1".parse::<NodeId>().unwrap(),
             id
         );
     }
