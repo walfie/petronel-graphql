@@ -47,7 +47,16 @@ impl str::FromStr for NodeId {
 
 impl NodeId {
     pub fn from_boss_name(name: &LangString) -> Self {
-        Self::Boss(name.canonical().cloned().unwrap_or_else(|| "".into()))
+        // Use whichever boss name is smaller (in terms of bytes),
+        // since both names resolve to the same boss anyway
+        let shorter_name = Language::VALUES
+            .iter()
+            .flat_map(|lang| name.get(*lang))
+            .min_by_key(|n| n.len())
+            .cloned()
+            .unwrap_or_else(|| "".into());
+
+        Self::Boss(shorter_name)
     }
 }
 
