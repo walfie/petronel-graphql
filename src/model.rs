@@ -2,6 +2,7 @@ use chrono::offset::{TimeZone, Utc};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::str;
 use std::sync::atomic::AtomicI64;
@@ -18,18 +19,22 @@ pub type RaidId = String;
 /// GraphQL Node ID
 // Variants should not be reordered, otherwise the discriminants may change
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum NodeId {
-    Boss(BossName),
+pub enum NodeId<'a> {
+    Boss(Cow<'a, BossName>),
+    Tweet {
+        boss_name: Cow<'a, BossName>,
+        id: TweetId,
+    },
 }
 
-impl ToString for NodeId {
+impl<'a> ToString for NodeId<'a> {
     fn to_string(&self) -> String {
         let bytes = postcard::to_allocvec(self).expect("failed to stringify NodeId");
         bs58::encode(&bytes).into_string()
     }
 }
 
-impl str::FromStr for NodeId {
+impl<'a> str::FromStr for NodeId<'a> {
     type Err = ();
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
@@ -38,18 +43,19 @@ impl str::FromStr for NodeId {
     }
 }
 
-impl NodeId {
-    pub fn from_boss_name(name: &LangString) -> Self {
+impl<'a> NodeId<'a> {
+    pub fn from_boss_name(name: &'a LangString) -> Self {
         // Use whichever boss name is smaller (in terms of bytes),
         // since both names resolve to the same boss anyway
         let shorter_name = Language::VALUES
             .iter()
             .flat_map(|lang| name.get(*lang))
-            .min_by_key(|n| n.len())
-            .cloned()
-            .unwrap_or_else(|| "".into());
+            .min_by_key(|n| n.len());
 
-        Self::Boss(shorter_name)
+        Self::Boss(match shorter_name {
+            Some(name) => Cow::Borrowed(name),
+            None => Cow::Owned("".into()),
+        })
     }
 }
 
@@ -384,9 +390,23 @@ mod test {
 
     #[test]
     fn node_id() {
-        let id = NodeId::Boss("Lvl 60 Ozorotter".into());
-        assert_eq!(id.to_string().parse::<NodeId>().unwrap(), id);
-        dbg!(id.to_string());
-        assert_eq!("19tEYPVo4M8Se6zuWtuEfTUm".parse::<NodeId>().unwrap(), id);
+        let boss_id = NodeId::Boss(Cow::Owned("Lvl 60 Ozorotter".into()));
+        assert_eq!(boss_id.to_string().parse::<NodeId>().unwrap(), boss_id);
+        assert_eq!(
+            "19tEYPVo4M8Se6zuWtuEfTUm".parse::<NodeId>().unwrap(),
+            boss_id
+        );
+
+        let tweet_id = NodeId::Tweet {
+            id: 12345,
+            boss_name: Cow::Owned("Lvl 60 Ozorotter".into()),
+        };
+        assert_eq!(tweet_id.to_string().parse::<NodeId>().unwrap(), tweet_id);
+        assert_eq!(
+            "2tZuN3FDjpjw5tpBuZ2zHB8yZQFQMLiN6K1"
+                .parse::<NodeId>()
+                .unwrap(),
+            tweet_id
+        );
     }
 }

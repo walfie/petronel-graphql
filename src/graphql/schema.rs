@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::str;
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use futures::stream::Stream;
 #[gql::Interface(field(name = "id", type = "gql::ID"))]
 enum Node {
     Boss(Arc<BossEntry>),
+    Tweet(Arc<Raid>),
 }
 
 pub struct QueryRoot;
@@ -20,6 +22,15 @@ impl QueryRoot {
     async fn node(&self, ctx: &Context<'_>, id: gql::ID) -> Option<Node> {
         match id.parse().ok()? {
             NodeId::Boss(name) => ctx.data::<RaidHandler>().boss(&name).map(Node::Boss),
+            NodeId::Tweet { boss_name, id } => {
+                ctx.data::<RaidHandler>().boss(&boss_name).and_then(|boss| {
+                    boss.history()
+                        .read()
+                        .iter()
+                        .find(|tweet| tweet.tweet_id == id)
+                        .map(|t| Node::Tweet(t.clone()))
+                })
+            }
         }
     }
 
@@ -100,9 +111,19 @@ impl BossEntry {
     }
 }
 
-#[gql::Object]
+#[gql::Object(name = "Tweet")]
 /// A tweet containing a raid invite
 impl Raid {
+    /// Node ID
+    async fn id(&self) -> gql::ID {
+        let node_id = NodeId::Tweet {
+            id: self.tweet_id,
+            boss_name: Cow::Borrowed(&self.boss_name),
+        };
+
+        node_id.to_string().into()
+    }
+
     /// Raid ID
     async fn raid_id(&self) -> &str {
         &self.id
