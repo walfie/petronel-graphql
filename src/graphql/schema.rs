@@ -8,6 +8,31 @@ use async_graphql as gql;
 use async_graphql::Context;
 use futures::stream::Stream;
 
+#[gql::Interface(field(name = "id", type = "gql::ID"))]
+enum Node {
+    Boss(Arc<BossEntry>),
+}
+
+pub struct QueryRoot;
+
+#[gql::Object]
+impl QueryRoot {
+    async fn node(&self, ctx: &Context<'_>, id: gql::ID) -> Option<Node> {
+        match id.parse().ok()? {
+            NodeId::Boss(name) => ctx.data::<RaidHandler>().boss(&name).map(Node::Boss),
+        }
+    }
+
+    // TODO: pagination, first/last, etc
+    async fn bosses(&self, ctx: &Context<'_>) -> Vec<Arc<BossEntry>> {
+        ctx.data::<RaidHandler>().bosses().clone()
+    }
+
+    async fn boss(&self, ctx: &Context<'_>, name: String) -> Option<Arc<BossEntry>> {
+        ctx.data::<RaidHandler>().boss(&name.into())
+    }
+}
+
 pub struct SubscriptionRoot;
 
 #[gql::Subscription]
@@ -22,26 +47,6 @@ impl SubscriptionRoot {
         #[arg(name = "bossName")] boss_name: String,
     ) -> impl Stream<Item = Arc<Raid>> {
         ctx.data::<RaidHandler>().subscribe(boss_name.into())
-    }
-}
-
-pub struct QueryRoot;
-
-#[gql::Object]
-impl QueryRoot {
-    async fn node(&self, ctx: &Context<'_>, id: String) -> Option<Arc<BossEntry>> {
-        match id.parse().ok()? {
-            NodeId::Boss(name) => ctx.data::<RaidHandler>().boss(&name),
-        }
-    }
-
-    // TODO: pagination, first/last, etc
-    async fn bosses(&self, ctx: &Context<'_>) -> Vec<Arc<BossEntry>> {
-        ctx.data::<RaidHandler>().bosses().clone()
-    }
-
-    async fn boss(&self, ctx: &Context<'_>, name: String) -> Option<Arc<BossEntry>> {
-        ctx.data::<RaidHandler>().boss(&name.into())
     }
 }
 
@@ -65,12 +70,12 @@ impl LangString {
     }
 }
 
-#[gql::Object]
+#[gql::Object(name = "Boss")]
 /// A raid boss
 impl BossEntry {
     /// Node ID
-    async fn id(&self) -> &str {
-        self.node_id()
+    async fn id(&self) -> gql::ID {
+        self.node_id().into()
     }
 
     /// Boss name
