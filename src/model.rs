@@ -15,18 +15,17 @@ pub type Level = i16;
 pub type TweetId = u64;
 pub type RaidId = String;
 
-// GraphQL Node ID
-#[derive(Debug, Clone, PartialEq)]
+/// GraphQL Node ID
+// Variants should not be reordered, otherwise the discriminants may change
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NodeId {
     Boss(BossName),
 }
 
 impl ToString for NodeId {
     fn to_string(&self) -> String {
-        let string_to_encode = match self {
-            Self::Boss(name) => format!("boss:{}", name),
-        };
-        bs58::encode(&string_to_encode).into_string()
+        let bytes = postcard::to_allocvec(self).expect("failed to stringify NodeId");
+        bs58::encode(&bytes).into_string()
     }
 }
 
@@ -35,13 +34,7 @@ impl str::FromStr for NodeId {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let bytes = bs58::decode(input).into_vec().map_err(|_| ())?;
-        let decoded = str::from_utf8(&bytes).map_err(|_| ())?;
-
-        let mut parts = decoded.splitn(2, ':');
-        match (parts.next(), parts.next()) {
-            (Some("boss"), Some(id)) => Ok(Self::Boss(id.into())),
-            _ => Err(()),
-        }
+        postcard::from_bytes(&bytes).map_err(|_| ())
     }
 }
 
@@ -393,9 +386,7 @@ mod test {
     fn node_id() {
         let id = NodeId::Boss("Lvl 60 Ozorotter".into());
         assert_eq!(id.to_string().parse::<NodeId>().unwrap(), id);
-        assert_eq!(
-            "7456rjyoQwqQfRqRH2mGW7W2S67e1".parse::<NodeId>().unwrap(),
-            id
-        );
+        dbg!(id.to_string());
+        assert_eq!("19tEYPVo4M8Se6zuWtuEfTUm".parse::<NodeId>().unwrap(), id);
     }
 }

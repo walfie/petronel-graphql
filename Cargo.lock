@@ -1584,6 +1584,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "pin-project-lite",
+ "postcard",
  "redis",
  "regex",
  "serde",
@@ -1697,6 +1698,22 @@ dependencies = [
  "deflate",
  "inflate",
 ]
+
+[[package]]
+name = "postcard"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2ba083a6a640a9f09d294c0f504acdd7a2b000c179e80c73d4b7a036bfd8164"
+dependencies = [
+ "postcard-cobs",
+ "serde",
+]
+
+[[package]]
+name = "postcard-cobs"
+version = "0.1.5-pre"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c68cb38ed13fd7bc9dd5db8f165b7c8d9c1a315104083a2b10f11354c2af97f"
 
 [[package]]
 name = "ppv-lite86"
