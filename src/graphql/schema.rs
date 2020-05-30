@@ -17,21 +17,31 @@ enum Node {
 
 pub struct QueryRoot;
 
+fn get_node(raid_handler: &RaidHandler, id: &gql::ID) -> Option<Node> {
+    match id.parse().ok()? {
+        NodeId::Boss(name) => raid_handler.boss(&name).map(Node::Boss),
+        NodeId::Tweet { boss_name, id } => raid_handler.boss(&boss_name).and_then(|boss| {
+            boss.history()
+                .read()
+                .iter()
+                .find(|tweet| tweet.tweet_id == id)
+                .map(|t| Node::Tweet(t.clone()))
+        }),
+    }
+}
+
 #[gql::Object]
 impl QueryRoot {
     async fn node(&self, ctx: &Context<'_>, id: gql::ID) -> Option<Node> {
-        match id.parse().ok()? {
-            NodeId::Boss(name) => ctx.data::<RaidHandler>().boss(&name).map(Node::Boss),
-            NodeId::Tweet { boss_name, id } => {
-                ctx.data::<RaidHandler>().boss(&boss_name).and_then(|boss| {
-                    boss.history()
-                        .read()
-                        .iter()
-                        .find(|tweet| tweet.tweet_id == id)
-                        .map(|t| Node::Tweet(t.clone()))
-                })
-            }
-        }
+        get_node(ctx.data::<RaidHandler>(), &id)
+    }
+
+    async fn nodes(&self, ctx: &Context<'_>, ids: Vec<gql::ID>) -> Vec<Option<Node>> {
+        // TODO: Could be optimized more for tweets. The IDs requested could be multiple tweets
+        // from the same boss, but we currently iterate through the list once for each requested
+        // tweet node, when instead we could iterate once per unique boss.
+        let raid_handler = ctx.data::<RaidHandler>();
+        ids.iter().map(|id| get_node(raid_handler, &id)).collect()
     }
 
     // TODO: pagination, first/last, etc
