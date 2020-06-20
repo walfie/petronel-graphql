@@ -12,7 +12,7 @@ pub use crate::image_hash::phash::ImageHash;
 pub type CachedString = string_cache::DefaultAtom;
 pub type BossName = CachedString;
 pub type DateTime = chrono::DateTime<Utc>;
-pub type Level = i16;
+pub type Level = i32;
 pub type TweetId = u64;
 pub type RaidId = String;
 
@@ -146,7 +146,7 @@ impl Ord for DateTimeString {
 impl From<DateTime> for DateTimeString {
     fn from(value: DateTime) -> Self {
         Self {
-            string: value.to_string(),
+            string: value.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             datetime: value,
         }
     }

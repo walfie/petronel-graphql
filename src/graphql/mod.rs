@@ -1,34 +1,63 @@
 mod schema;
 
 use crate::raid_handler::RaidHandler;
-use async_graphql::http::GQLResponse;
-use async_graphql::{EmptyMutation, QueryBuilder, Schema};
-use async_graphql_warp::BadRequest;
-use http::StatusCode;
-use std::convert::Infallible;
-use warp::{http::Response, Filter, Rejection, Reply};
+use futures::FutureExt;
+use juniper::{EmptyMutation, RootNode};
+use juniper_subscriptions::Coordinator;
+use juniper_warp::subscriptions::graphql_subscriptions;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use warp::{http::Response, Filter};
 
-pub fn routes(
-    handler: RaidHandler,
-) -> impl Filter<Extract = impl warp::Reply, Error = Infallible> + Clone {
-    let schema = Schema::build(schema::QueryRoot, EmptyMutation, schema::SubscriptionRoot)
-        .data(handler.clone())
-        .finish();
+type Schema = RootNode<'static, schema::Query, EmptyMutation<RaidHandler>, schema::Subscription>;
+
+fn schema() -> Schema {
+    Schema::new(
+        schema::Query,
+        EmptyMutation::<RaidHandler>::new(),
+        schema::Subscription,
+    )
+}
+
+pub fn routes(handler: RaidHandler) -> impl Filter<Extract = impl warp::Reply> + Clone {
+    let graphql_context = {
+        let handler = handler.clone();
+        warp::any().map(move || handler.clone())
+    };
+
+    let coordinator = Arc::new(juniper_subscriptions::Coordinator::new(schema()));
+    let websocket_graphql = warp::path!("graphql")
+        .and(warp::ws())
+        .and(graphql_context.clone())
+        .and(warp::any().map(move || coordinator.clone()))
+        .map(
+            |ws: warp::ws::Ws,
+             ctx: RaidHandler,
+             coordinator: Arc<Coordinator<'static, _, _, _, _, _>>| {
+                ws.on_upgrade(|websocket| -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                    graphql_subscriptions(websocket, coordinator, ctx)
+                        .map(|r| {
+                            if let Err(e) = r {
+                                // TODO
+                                println!("Websocket error: {}", e);
+                            }
+                        })
+                        .boxed()
+                })
+            },
+        )
+        .map(|reply| warp::reply::with_header(reply, "Sec-WebSocket-Protocol", "graphql-ws"));
 
     let post_graphql = warp::path!("graphql")
         .and(warp::header::exact_ignore_case(
             "accept",
             "application/json",
         ))
-        .and(async_graphql_warp::graphql(schema.clone()))
-        .and_then(|(schema, builder): (_, QueryBuilder)| async move {
-            let resp = builder.execute(&schema).await;
-            Ok::<_, Infallible>(warp::reply::json(&GQLResponse(resp)).into_response())
-        });
-
-    let websocket_graphql = warp::path!("graphql")
-        .and(warp::header::exact_ignore_case("connection", "upgrade"))
-        .and(async_graphql_warp::graphql_subscription(schema));
+        .and(juniper_warp::make_graphql_filter(
+            schema(),
+            graphql_context.boxed(),
+        ));
 
     // TODO: Configurable
     let get_graphiql = warp::path!("graphiql").and(warp::get()).map(|| {
@@ -55,21 +84,7 @@ pub fn routes(
         .or(websocket_graphql)
         .or(get_graphiql)
         .or(get_metrics)
-        .with(cors)
-        .recover(|err: Rejection| async move {
-            if let Some(BadRequest(err)) = err.find() {
-                return Ok::<_, Infallible>(warp::reply::with_status(
-                    err.to_string(),
-                    StatusCode::BAD_REQUEST,
-                ));
-            }
-
-            // TODO: It's not always a 500. Could be 404, etc
-            Ok(warp::reply::with_status(
-                "INTERNAL_SERVER_ERROR".to_string(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))
-        });
+        .with(cors);
 
     routes
 }

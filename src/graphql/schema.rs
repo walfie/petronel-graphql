@@ -1,23 +1,26 @@
 use std::borrow::Cow;
+use std::pin::Pin;
 use std::str;
 use std::sync::Arc;
 
 use crate::model::*;
 use crate::raid_handler::{BossEntry, RaidHandler};
 
-use async_graphql as gql;
-use async_graphql::Context;
+use futures::future::ready;
 use futures::stream::Stream;
+use juniper::{
+    Arguments, BoxFuture, DefaultScalarValue, ExecutionResult, Executor, GraphQLType, Selection,
+};
 
-#[gql::Interface(field(name = "id", type = "gql::ID"))]
-enum Node {
-    Boss(Arc<BossEntry>),
-    Tweet(Arc<Raid>),
-}
+#[derive(juniper::GraphQLScalarValue)]
+#[graphql(transparent, name = "ID")]
+pub struct Id(String);
 
-pub struct QueryRoot;
+pub struct Query;
 
-fn get_node(raid_handler: &RaidHandler, id: &gql::ID) -> Option<Node> {
+impl juniper::Context for RaidHandler {}
+
+fn get_node(raid_handler: &RaidHandler, id: &str) -> Option<Node> {
     match id.parse().ok()? {
         NodeId::Boss(name) => raid_handler.boss(&name).map(Node::Boss),
         NodeId::Tweet { boss_name, id } => raid_handler.boss(&boss_name).and_then(|boss| {
@@ -30,141 +33,205 @@ fn get_node(raid_handler: &RaidHandler, id: &gql::ID) -> Option<Node> {
     }
 }
 
-#[gql::Object]
-impl QueryRoot {
-    async fn node(&self, ctx: &Context<'_>, id: gql::ID) -> Option<Node> {
-        get_node(ctx.data::<RaidHandler>(), &id)
+#[juniper::graphql_object(Context = RaidHandler)]
+impl Query {
+    fn node(&self, ctx: &RaidHandler, id: Id) -> Option<Node> {
+        get_node(ctx, &id.0)
     }
 
-    async fn nodes(&self, ctx: &Context<'_>, ids: Vec<gql::ID>) -> Vec<Option<Node>> {
+    fn nodes(&self, ctx: &RaidHandler, ids: Vec<Id>) -> Vec<Option<Node>> {
         // TODO: Could be optimized more for tweets. The IDs requested could be multiple tweets
         // from the same boss, but we currently iterate through the list once for each requested
         // tweet node, when instead we could iterate once per unique boss.
-        let raid_handler = ctx.data::<RaidHandler>();
-        ids.iter().map(|id| get_node(raid_handler, &id)).collect()
+        ids.iter().map(|id| get_node(ctx, &id.0)).collect()
     }
 
     // TODO: pagination, first/last, etc
-    async fn bosses(&self, ctx: &Context<'_>) -> Vec<Arc<BossEntry>> {
-        ctx.data::<RaidHandler>().bosses().clone()
+    fn bosses(&self, ctx: &RaidHandler) -> Vec<Arc<BossEntry>> {
+        ctx.bosses().clone()
     }
 
-    async fn boss(&self, ctx: &Context<'_>, name: String) -> Option<Arc<BossEntry>> {
-        ctx.data::<RaidHandler>().boss(&name.into())
-    }
-}
-
-pub struct SubscriptionRoot;
-
-#[gql::Subscription]
-impl SubscriptionRoot {
-    async fn bosses(&self, ctx: &Context<'_>) -> impl Stream<Item = Arc<BossEntry>> {
-        ctx.data::<RaidHandler>().subscribe_boss_updates()
-    }
-
-    async fn tweets(
-        &self,
-        ctx: &Context<'_>,
-        #[arg(name = "bossName")] boss_name: String,
-    ) -> impl Stream<Item = Arc<Raid>> {
-        ctx.data::<RaidHandler>().subscribe(boss_name.into())
+    fn boss(&self, ctx: &RaidHandler, name: String) -> Option<Arc<BossEntry>> {
+        ctx.boss(&name.into())
     }
 }
 
-#[gql::Object]
+pub struct Subscription;
+type SubscriptionStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
+
+#[juniper::graphql_subscription(Context = RaidHandler)]
+impl Subscription {
+    async fn bosses(&self, ctx: &RaidHandler) -> SubscriptionStream<Arc<BossEntry>> {
+        Box::pin(ctx.subscribe_boss_updates())
+    }
+
+    async fn tweets(&self, ctx: &RaidHandler, boss_name: String) -> SubscriptionStream<Arc<Raid>> {
+        Box::pin(ctx.subscribe(boss_name.into()))
+    }
+}
+
+#[juniper::graphql_object]
 /// A string (name, URL, etc) that differs based on language
 impl LangString {
     /// The Japanese string, if it exists. Otherwise, the English one.
-    #[field(name = "canonical")]
-    async fn gql_canonical(&self) -> Option<&str> {
+    fn canonical(&self) -> Option<&str> {
         self.ja.as_deref().or_else(|| self.en.as_deref())
     }
 
     /// Japanese string
-    async fn ja(&self) -> Option<&str> {
+    fn ja(&self) -> Option<&str> {
         self.ja.as_deref()
     }
 
     /// English string
-    async fn en(&self) -> Option<&str> {
+    fn en(&self) -> Option<&str> {
         self.en.as_deref()
     }
 }
 
-#[gql::Object(name = "Boss")]
+#[juniper::graphql_object(name = "Boss", interfaces = [Node])]
 /// A raid boss
 impl BossEntry {
     /// Node ID
-    async fn id(&self) -> gql::ID {
-        self.node_id().into()
+    fn id(&self) -> Id {
+        Id(self.node_id().to_string())
     }
 
     /// Boss name
-    async fn name(&self) -> &LangString {
+    fn name(&self) -> &LangString {
         &self.boss().name
     }
 
     /// Twitter image URL
-    async fn image(&self) -> &LangString {
+    fn image(&self) -> &LangString {
         &self.boss().image
     }
 
     /// The level of the boss, if known
-    async fn level(&self) -> Option<Level> {
-        self.boss().level
+    fn level(&self) -> Option<i32> {
+        self.boss().level.map(|level| level as i32)
     }
 
     /// List of raid tweets
-    async fn tweets(&self) -> Vec<Arc<Raid>> {
+    fn tweets(&self) -> Vec<Arc<Raid>> {
         // TODO: Pagination
         self.history().read().iter().cloned().collect()
     }
 }
 
-#[gql::Object(name = "Tweet")]
+fn raid_node_id(raid: &Raid) -> Id {
+    let node_id = NodeId::Tweet {
+        id: raid.tweet_id,
+        boss_name: Cow::Borrowed(&raid.boss_name),
+    };
+
+    Id(node_id.to_string())
+}
+
+#[juniper::graphql_object(name = "Tweet", interfaces = [Node])]
 /// A tweet containing a raid invite
 impl Raid {
     /// Node ID
-    async fn id(&self) -> gql::ID {
-        let node_id = NodeId::Tweet {
-            id: self.tweet_id,
-            boss_name: Cow::Borrowed(&self.boss_name),
-        };
-
-        node_id.to_string().into()
+    fn id(&self) -> Id {
+        raid_node_id(self)
     }
 
     /// Raid ID
-    async fn raid_id(&self) -> &str {
+    fn raid_id(&self) -> &str {
         &self.id
     }
 
     /// Tweet ID
-    #[field(name = "tweetId")]
-    async fn tweet_id(&self) -> TweetId {
+    /*
+    #[graphql(name = "tweetId")]
+    fn tweet_id(&self) -> TweetId {
         self.tweet_id
     }
+    */
 
     /// Additional text associated with the tweet
-    async fn text(&self) -> Option<&str> {
+    fn text(&self) -> Option<&str> {
         self.text.as_deref()
     }
 
     // TODO: Add scalar type for DateTime as string
     /// Tweet creation date
-    #[field(name = "createdAt")]
-    async fn created_at(&self) -> &str {
+    #[graphql(name = "createdAt")]
+    fn created_at(&self) -> &str {
         self.created_at.as_str()
     }
 
     /// Twitter username
-    async fn username(&self) -> &str {
+    fn username(&self) -> &str {
         &self.user_name
     }
 
     /// Twitter user icon
-    #[field(name = "icon")]
-    async fn user_image(&self) -> Option<&str> {
+    #[graphql(name = "icon")]
+    fn user_image(&self) -> Option<&str> {
         self.user_image.as_deref()
+    }
+}
+
+enum Node {
+    Boss(Arc<BossEntry>),
+    Tweet(Arc<Raid>),
+}
+
+juniper::graphql_interface!(Node: () |&self| {
+    field id() -> Id {
+        match self {
+            Node::Boss(boss) => Id(boss.node_id().to_string()),
+            Node::Tweet(tweet) => raid_node_id(&tweet),
+        }
+    }
+
+    instance_resolvers: |_| {
+        &BossEntry => match *self { Node::Boss(ref b) => Some(b.as_ref()), _ => None },
+        &Raid => match *self { Node::Tweet(ref t) => Some(t.as_ref()), _ => None },
+    }
+});
+
+impl juniper::GraphQLTypeAsync<DefaultScalarValue> for Node {
+    fn resolve_field_async<'a>(
+        &'a self,
+        info: &'a Self::TypeInfo,
+        field_name: &'a str,
+        arguments: &'a Arguments<DefaultScalarValue>,
+        executor: &'a Executor<Self::Context, DefaultScalarValue>,
+    ) -> BoxFuture<'a, ExecutionResult<DefaultScalarValue>> {
+        Box::pin(ready(GraphQLType::resolve_field(
+            self, info, field_name, arguments, executor,
+        )))
+    }
+
+    fn resolve_async<'a>(
+        &'a self,
+        info: &'a Self::TypeInfo,
+        selection_set: Option<&'a [Selection<DefaultScalarValue>]>,
+        executor: &'a Executor<Self::Context, DefaultScalarValue>,
+    ) -> BoxFuture<'a, ExecutionResult<DefaultScalarValue>> {
+        Box::pin(ready(GraphQLType::resolve(
+            self,
+            info,
+            selection_set,
+            executor,
+        )))
+    }
+
+    fn resolve_into_type_async<'a>(
+        &'a self,
+        info: &'a Self::TypeInfo,
+        type_name: &str,
+        selection_set: Option<&'a [Selection<'a, DefaultScalarValue>]>,
+        executor: &'a Executor<'a, 'a, Self::Context, DefaultScalarValue>,
+    ) -> BoxFuture<'a, ExecutionResult<DefaultScalarValue>> {
+        Box::pin(ready(GraphQLType::resolve_into_type(
+            self,
+            info,
+            type_name,
+            selection_set,
+            executor,
+        )))
     }
 }
