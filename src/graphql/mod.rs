@@ -1,5 +1,6 @@
 mod schema;
 
+use crate::metrics::{Metric, MetricFactory};
 use crate::raid_handler::RaidHandler;
 use futures::FutureExt;
 use juniper::{EmptyMutation, RootNode};
@@ -33,9 +34,11 @@ pub fn routes(handler: RaidHandler) -> impl Filter<Extract = impl warp::Reply> +
             |ws: warp::ws::Ws,
              ctx: RaidHandler,
              coordinator: Arc<Coordinator<'static, _, _, _, _, _>>| {
-                ws.on_upgrade(|websocket| {
-                    graphql_subscriptions(websocket, coordinator, ctx).map(|_r| {
-                        // TODO: Metrics for number of ws connections
+                ws.on_upgrade(move |websocket| {
+                    ctx.metric_factory().websocket_connections_gauge().inc();
+
+                    graphql_subscriptions(websocket, coordinator, ctx.clone()).map(move |_r| {
+                        ctx.metric_factory().websocket_connections_gauge().dec();
                     })
                 })
             },

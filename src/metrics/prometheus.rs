@@ -90,7 +90,7 @@ impl PrometheusMetricFactory {
         );
 
         let websocket_connections_gauge = {
-            let key = format!("{}_websocket_connections{{}}", prefix);
+            let key = format!("{}_websocket_connections", prefix);
             PrometheusMetric::new(key)
         };
 
@@ -142,7 +142,14 @@ impl MetricFactory for PrometheusMetricFactory {
     fn write_per_boss_metrics(&self, metrics: &PerBossMetrics<'_, Self::Metric>) -> Self::Output {
         let mut out = String::new();
 
-        writeln!(&mut out, "{}", self.boss_tweets_counter_header).unwrap();
+        writeln!(
+            &mut out,
+            "{}\n{}",
+            self.websocket_connections_gauge_header, self.websocket_connections_gauge
+        )
+        .unwrap();
+
+        writeln!(&mut out, "\n{}", self.boss_tweets_counter_header).unwrap();
         for metric in &metrics.boss_tweets_counters {
             metric.for_each(|m| writeln!(&mut out, "{}", m).unwrap());
         }
@@ -151,13 +158,6 @@ impl MetricFactory for PrometheusMetricFactory {
         for metric in &metrics.boss_subscriptions_gauges {
             writeln!(&mut out, "{}", metric).unwrap();
         }
-
-        writeln!(
-            &mut out,
-            "\n{}\n{}\n",
-            self.websocket_connections_gauge_header, self.websocket_connections_gauge
-        )
-        .unwrap();
 
         out
     }
@@ -228,6 +228,10 @@ mod test {
         let output = factory.write_per_boss_metrics(&metrics);
         let expected = indoc!(
             r#"
+            # HELP petronel_websocket_connections Number of active websocket connections
+            # TYPE petronel_websocket_connections gauge
+            petronel_websocket_connections 10
+
             # HELP petronel_tweets_total Number of tweets seen for boss
             # TYPE petronel_tweets_total counter
             petronel_tweets_total{name_ja="Lv60 オオゾラッコ",name_en="Lvl 60 Ozorotter",lang="ja"} 35
@@ -236,11 +240,6 @@ mod test {
             # HELP petronel_subscriptions Number of active subscriptions for boss
             # TYPE petronel_subscriptions gauge
             petronel_subscriptions{name_ja="Lv60 オオゾラッコ",name_en="Lvl 60 Ozorotter"} 100
-
-            # HELP petronel_websocket_connections Number of active websocket connections
-            # TYPE petronel_websocket_connections gauge
-            petronel_websocket_connections{} 10
-
             "#
         );
         assert_eq!(output, expected);
