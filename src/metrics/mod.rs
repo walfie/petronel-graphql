@@ -6,6 +6,7 @@ use crate::model::{LangString, Language};
 pub trait Metric: Clone {
     fn get(&self) -> usize;
     fn inc(&self);
+    fn dec(&self);
     fn set(&self, value: usize);
 }
 

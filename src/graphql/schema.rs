@@ -142,12 +142,9 @@ impl Raid {
     }
 
     /// Tweet ID
-    /*
-    #[graphql(name = "tweetId")]
-    fn tweet_id(&self) -> TweetId {
-        self.tweet_id
+    fn tweet_id(&self) -> Id {
+        Id(self.tweet_id.to_string())
     }
-    */
 
     /// Additional text associated with the tweet
     fn text(&self) -> Option<&str> {
