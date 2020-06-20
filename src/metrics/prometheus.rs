@@ -1,4 +1,4 @@
-use crate::metrics::{LangMetric, Metric, MetricFactory, PerBossMetrics};
+use crate::metrics::{LangMetric, Metric, MetricFactory, PerBossMetrics, ServerMetrics};
 use crate::model::{LangString, Language};
 use std::fmt;
 use std::fmt::Write;
@@ -58,26 +58,41 @@ pub struct PrometheusMetricFactory {
     prefix: String,
     boss_tweets_counter_header: String,
     boss_subscriptions_gauge_header: String,
+    websocket_connections_gauge_header: String,
 }
 
 impl PrometheusMetricFactory {
     pub fn new(prefix: String) -> Self {
-        let boss_tweets_counter_header = format!(
-            "\
-            # HELP {prefix}_tweets_total Number of tweets seen for boss\n\
-            # TYPE {prefix}_tweets_total counter",
-            prefix = &prefix
+        let header = |name, description, kind| {
+            format!(
+                "\
+                # HELP {prefix}_{name} {description}\n\
+                # TYPE {prefix}_{name} {kind}",
+                prefix = &prefix,
+                name = &name,
+                description = &description,
+                kind = &kind
+            )
+        };
+
+        let boss_tweets_counter_header =
+            header("tweets_total", "Number of tweets seen for boss", "counter");
+        let boss_subscriptions_gauge_header = header(
+            "subscriptions",
+            "Number of active subscriptions for boss",
+            "gauge",
         );
-        let boss_subscriptions_gauge_header = format!(
-            "\
-            # HELP {prefix}_subscriptions Number of subscriptions for boss\n\
-            # TYPE {prefix}_subscriptions gauge",
-            prefix = &prefix
+        let websocket_connections_gauge_header = header(
+            "websocket_connections",
+            "Number of active websocket connections",
+            "gauge",
         );
+
         Self {
             prefix,
             boss_tweets_counter_header,
             boss_subscriptions_gauge_header,
+            websocket_connections_gauge_header,
         }
     }
 }
@@ -113,6 +128,11 @@ impl MetricFactory for PrometheusMetricFactory {
         PrometheusMetric::new(key)
     }
 
+    fn websocket_connections_gauge(&self) -> PrometheusMetric {
+        let key = format!("{}_websocket_connections{{}}", self.prefix);
+        PrometheusMetric::new(key)
+    }
+
     fn write_per_boss_metrics(&self, metrics: &PerBossMetrics<'_, Self::Metric>) -> Self::Output {
         let mut out = String::new();
 
@@ -125,6 +145,21 @@ impl MetricFactory for PrometheusMetricFactory {
         for metric in &metrics.boss_subscriptions_gauges {
             writeln!(&mut out, "{}", metric).unwrap();
         }
+
+        writeln!(&mut out, "").unwrap();
+
+        out
+    }
+
+    fn write_server_metrics(&self, metrics: &ServerMetrics<Self::Metric>) -> Self::Output {
+        let mut out = String::new();
+
+        writeln!(
+            &mut out,
+            "{}\n{}\n",
+            self.websocket_connections_gauge_header, metrics.websocket_connections_gauge
+        )
+        .unwrap();
 
         out
     }
@@ -170,7 +205,7 @@ mod test {
     }
 
     #[test]
-    fn fmt_metrics() {
+    fn fmt_boss_metrics() {
         let factory = PrometheusMetricFactory::new("petronel".to_owned());
         let name = LangString {
             en: Some("Lvl 60 Ozorotter".into()),
@@ -198,9 +233,33 @@ mod test {
             petronel_tweets_total{name_ja="Lv60 オオゾラッコ",name_en="Lvl 60 Ozorotter",lang="ja"} 35
             petronel_tweets_total{name_ja="Lv60 オオゾラッコ",name_en="Lvl 60 Ozorotter",lang="en"} 2
 
-            # HELP petronel_subscriptions Number of subscriptions for boss
+            # HELP petronel_subscriptions Number of active subscriptions for boss
             # TYPE petronel_subscriptions gauge
             petronel_subscriptions{name_ja="Lv60 オオゾラッコ",name_en="Lvl 60 Ozorotter"} 100
+
+            "#
+        );
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn fmt_server_metrics() {
+        let factory = PrometheusMetricFactory::new("petronel".to_owned());
+
+        let gauge = factory.websocket_connections_gauge();
+        gauge.set(10);
+
+        let metrics = ServerMetrics {
+            websocket_connections_gauge: gauge,
+        };
+
+        let output = factory.write_server_metrics(&metrics);
+        let expected = indoc!(
+            r#"
+            # HELP petronel_websocket_connections Number of active websocket connections
+            # TYPE petronel_websocket_connections gauge
+            petronel_websocket_connections{} 10
+
             "#
         );
         assert_eq!(output, expected);
