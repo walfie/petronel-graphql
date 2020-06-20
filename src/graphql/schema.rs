@@ -16,6 +16,11 @@ use juniper::{
 #[graphql(transparent, name = "ID")]
 pub struct Id(String);
 
+#[derive(juniper::GraphQLScalarValue)]
+#[graphql(transparent, name = "DateTime")]
+/// An ISO-8601 encoded UTC date string.
+pub struct DateTime(String);
+
 pub struct Query;
 
 impl juniper::Context for RaidHandler {}
@@ -151,11 +156,9 @@ impl Raid {
         self.text.as_deref()
     }
 
-    // TODO: Add scalar type for DateTime as string
     /// Tweet creation date
-    #[graphql(name = "createdAt")]
-    fn created_at(&self) -> &str {
-        self.created_at.as_str()
+    fn created_at(&self) -> DateTime {
+        DateTime(self.created_at.as_str().to_owned())
     }
 
     /// Twitter username
