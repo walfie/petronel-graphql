@@ -11,16 +11,16 @@ pub trait Metric: Clone {
 }
 
 pub struct Metrics<'m, M: Metric> {
-    pub boss_tweet_counters: Vec<&'m LangMetric<M>>,
-    pub boss_subscriber_gauges: Vec<&'m M>,
+    pub boss_tweets_counters: Vec<&'m LangMetric<M>>,
+    pub boss_subscriptions_gauges: Vec<&'m M>,
 }
 
 pub trait MetricFactory {
     type Metric: Metric;
     type Output;
 
-    fn boss_tweet_counter(&self, name: &LangString) -> LangMetric<Self::Metric>;
-    fn boss_subscriber_gauge(&self, name: &LangString) -> Self::Metric;
+    fn boss_tweets_counter(&self, name: &LangString) -> LangMetric<Self::Metric>;
+    fn boss_subscriptions_gauge(&self, name: &LangString) -> Self::Metric;
     fn write(&self, metrics: &Metrics<'_, Self::Metric>) -> Self::Output;
 }
 

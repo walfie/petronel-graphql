@@ -175,8 +175,8 @@ impl BossMap {
                 node_id: NodeId::from_boss_name(&boss.name).to_string().into(),
                 history: RwLock::new(CircularQueue::with_capacity(history_size)),
                 broadcast: tx,
-                tweet_count: metric_factory.boss_tweet_counter(&boss.name),
-                subscriber_count: metric_factory.boss_subscriber_gauge(&boss.name),
+                tweet_count: metric_factory.boss_tweets_counter(&boss.name),
+                subscriber_count: metric_factory.boss_subscriptions_gauge(&boss.name),
                 boss,
             });
 
@@ -274,8 +274,8 @@ impl BossMap {
             node_id: NodeId::from_boss_name(&boss.name).to_string().into(),
             history: RwLock::new(CircularQueue::with_capacity(self.history_size)),
             broadcast,
-            tweet_count: metric_factory.boss_tweet_counter(&boss.name),
-            subscriber_count: metric_factory.boss_subscriber_gauge(&boss.name),
+            tweet_count: metric_factory.boss_tweets_counter(&boss.name),
+            subscriber_count: metric_factory.boss_subscriptions_gauge(&boss.name),
             boss,
         };
 
@@ -333,14 +333,16 @@ impl RaidHandlerInner {
         let bosses = self.bosses();
 
         let mut metrics = Metrics {
-            boss_tweet_counters: Vec::with_capacity(bosses.len()),
-            boss_subscriber_gauges: Vec::with_capacity(bosses.len()),
+            boss_tweets_counters: Vec::with_capacity(bosses.len()),
+            boss_subscriptions_gauges: Vec::with_capacity(bosses.len()),
         };
 
         for boss in bosses.iter() {
-            metrics.boss_tweet_counters.push(&boss.tweet_count);
+            metrics.boss_tweets_counters.push(&boss.tweet_count);
             boss.subscriber_count.set(boss.broadcast.receiver_count());
-            metrics.boss_subscriber_gauges.push(&boss.subscriber_count);
+            metrics
+                .boss_subscriptions_gauges
+                .push(&boss.subscriber_count);
         }
 
         self.metric_factory.write(&metrics)
@@ -407,8 +409,10 @@ impl RaidHandlerInner {
                 node_id: NodeId::from_boss_name(&merged_boss.name).to_string().into(),
                 history: RwLock::new(new_history),
                 broadcast: entry_to_keep.broadcast.clone(),
-                tweet_count: self.metric_factory.boss_tweet_counter(&merged_boss.name),
-                subscriber_count: self.metric_factory.boss_subscriber_gauge(&merged_boss.name),
+                tweet_count: self.metric_factory.boss_tweets_counter(&merged_boss.name),
+                subscriber_count: self
+                    .metric_factory
+                    .boss_subscriptions_gauge(&merged_boss.name),
                 boss: merged_boss,
             });
 

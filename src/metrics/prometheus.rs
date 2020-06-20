@@ -56,28 +56,28 @@ impl fmt::Display for PrometheusMetric {
 #[derive(Debug)]
 pub struct PrometheusMetricFactory {
     prefix: String,
-    boss_tweet_counter_header: String,
-    boss_subscriber_gauge_header: String,
+    boss_tweets_counter_header: String,
+    boss_subscriptions_gauge_header: String,
 }
 
 impl PrometheusMetricFactory {
     pub fn new(prefix: String) -> Self {
-        let boss_tweet_counter_header = format!(
+        let boss_tweets_counter_header = format!(
             "\
             # HELP {prefix}_tweets_total Number of tweets seen for boss\n\
             # TYPE {prefix}_tweets_total counter",
             prefix = &prefix
         );
-        let boss_subscriber_gauge_header = format!(
+        let boss_subscriptions_gauge_header = format!(
             "\
-            # HELP {prefix}_subscribers_total Number of subscribers for boss\n\
-            # TYPE {prefix}_subscribers_total gauge",
+            # HELP {prefix}_subscriptions Number of subscriptions for boss\n\
+            # TYPE {prefix}_subscriptions gauge",
             prefix = &prefix
         );
         Self {
             prefix,
-            boss_tweet_counter_header,
-            boss_subscriber_gauge_header,
+            boss_tweets_counter_header,
+            boss_subscriptions_gauge_header,
         }
     }
 }
@@ -86,7 +86,7 @@ impl MetricFactory for PrometheusMetricFactory {
     type Output = String;
     type Metric = PrometheusMetric;
 
-    fn boss_tweet_counter(&self, name: &LangString) -> LangMetric<PrometheusMetric> {
+    fn boss_tweets_counter(&self, name: &LangString) -> LangMetric<PrometheusMetric> {
         let make = |lang: Language| {
             let key = format!(
                 "{}_tweets_total{{name_ja=\"{}\",name_en=\"{}\",lang=\"{}\"}}",
@@ -102,9 +102,9 @@ impl MetricFactory for PrometheusMetricFactory {
         LangMetric::new(make(Language::Japanese), make(Language::English))
     }
 
-    fn boss_subscriber_gauge(&self, name: &LangString) -> PrometheusMetric {
+    fn boss_subscriptions_gauge(&self, name: &LangString) -> PrometheusMetric {
         let key = format!(
-            "{}_subscribers_total{{name_ja=\"{}\",name_en=\"{}\"}}",
+            "{}_subscriptions{{name_ja=\"{}\",name_en=\"{}\"}}",
             self.prefix,
             Label::new(name.ja.as_deref().unwrap_or("")),
             Label::new(name.en.as_deref().unwrap_or("")),
@@ -116,13 +116,13 @@ impl MetricFactory for PrometheusMetricFactory {
     fn write(&self, metrics: &Metrics<'_, Self::Metric>) -> Self::Output {
         let mut out = String::new();
 
-        writeln!(&mut out, "{}", self.boss_tweet_counter_header).unwrap();
-        for metric in &metrics.boss_tweet_counters {
+        writeln!(&mut out, "{}", self.boss_tweets_counter_header).unwrap();
+        for metric in &metrics.boss_tweets_counters {
             metric.for_each(|m| writeln!(&mut out, "{}", m).unwrap());
         }
 
-        writeln!(&mut out, "\n{}", self.boss_subscriber_gauge_header).unwrap();
-        for metric in &metrics.boss_subscriber_gauges {
+        writeln!(&mut out, "\n{}", self.boss_subscriptions_gauge_header).unwrap();
+        for metric in &metrics.boss_subscriptions_gauges {
             writeln!(&mut out, "{}", metric).unwrap();
         }
 
@@ -177,8 +177,8 @@ mod test {
             ja: Some("Lv60 オオゾラッコ".into()),
         };
 
-        let counter = factory.boss_tweet_counter(&name);
-        let gauge = factory.boss_subscriber_gauge(&name);
+        let counter = factory.boss_tweets_counter(&name);
+        let gauge = factory.boss_subscriptions_gauge(&name);
 
         counter.get(Language::English).inc();
         counter.get(Language::English).inc();
@@ -186,8 +186,8 @@ mod test {
         gauge.set(100);
 
         let metrics = Metrics {
-            boss_tweet_counters: vec![&counter],
-            boss_subscriber_gauges: vec![&gauge],
+            boss_tweets_counters: vec![&counter],
+            boss_subscriptions_gauges: vec![&gauge],
         };
 
         let output = factory.write(&metrics);
@@ -198,9 +198,9 @@ mod test {
             petronel_tweets_total{name_ja="Lv60 オオゾラッコ",name_en="Lvl 60 Ozorotter",lang="ja"} 35
             petronel_tweets_total{name_ja="Lv60 オオゾラッコ",name_en="Lvl 60 Ozorotter",lang="en"} 2
 
-            # HELP petronel_subscribers_total Number of subscribers for boss
-            # TYPE petronel_subscribers_total gauge
-            petronel_subscribers_total{name_ja="Lv60 オオゾラッコ",name_en="Lvl 60 Ozorotter"} 100
+            # HELP petronel_subscriptions Number of subscriptions for boss
+            # TYPE petronel_subscriptions gauge
+            petronel_subscriptions{name_ja="Lv60 オオゾラッコ",name_en="Lvl 60 Ozorotter"} 100
             "#
         );
         assert_eq!(output, expected);
