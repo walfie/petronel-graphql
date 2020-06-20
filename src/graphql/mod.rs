@@ -5,8 +5,6 @@ use futures::FutureExt;
 use juniper::{EmptyMutation, RootNode};
 use juniper_subscriptions::Coordinator;
 use juniper_warp::subscriptions::graphql_subscriptions;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use warp::{http::Response, Filter};
 
@@ -35,15 +33,10 @@ pub fn routes(handler: RaidHandler) -> impl Filter<Extract = impl warp::Reply> +
             |ws: warp::ws::Ws,
              ctx: RaidHandler,
              coordinator: Arc<Coordinator<'static, _, _, _, _, _>>| {
-                ws.on_upgrade(|websocket| -> Pin<Box<dyn Future<Output = ()> + Send>> {
-                    graphql_subscriptions(websocket, coordinator, ctx)
-                        .map(|r| {
-                            if let Err(e) = r {
-                                // TODO
-                                println!("Websocket error: {}", e);
-                            }
-                        })
-                        .boxed()
+                ws.on_upgrade(|websocket| {
+                    graphql_subscriptions(websocket, coordinator, ctx).map(|_r| {
+                        // TODO: Metrics for number of ws connections
+                    })
                 })
             },
         )
@@ -54,7 +47,7 @@ pub fn routes(handler: RaidHandler) -> impl Filter<Extract = impl warp::Reply> +
             "accept",
             "application/json",
         ))
-        .and(juniper_warp::make_graphql_filter(
+        .and(juniper_warp::make_graphql_filter_sync(
             schema(),
             graphql_context.boxed(),
         ));
