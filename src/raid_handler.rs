@@ -329,6 +329,10 @@ impl RaidHandlerInner {
         Bosses(self.bosses.as_vec().load())
     }
 
+    pub fn metric_factory(&self) -> &PrometheusMetricFactory {
+        &self.metric_factory
+    }
+
     pub fn metrics(&self) -> <PrometheusMetricFactory as MetricFactory>::Output {
         let bosses = self.bosses();
 

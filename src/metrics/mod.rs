@@ -15,10 +15,6 @@ pub struct PerBossMetrics<'m, M: Metric> {
     pub boss_subscriptions_gauges: Vec<&'m M>,
 }
 
-pub struct ServerMetrics<M: Metric> {
-    pub websocket_connections_gauge: M,
-}
-
 pub trait MetricFactory {
     type Metric: Metric;
     type Output;
@@ -26,10 +22,9 @@ pub trait MetricFactory {
     fn boss_tweets_counter(&self, name: &LangString) -> LangMetric<Self::Metric>;
     fn boss_subscriptions_gauge(&self, name: &LangString) -> Self::Metric;
 
-    fn websocket_connections_gauge(&self) -> Self::Metric;
+    fn websocket_connections_gauge(&self) -> &Self::Metric;
 
     fn write_per_boss_metrics(&self, metrics: &PerBossMetrics<'_, Self::Metric>) -> Self::Output;
-    fn write_server_metrics(&self, metrics: &ServerMetrics<Self::Metric>) -> Self::Output;
 }
 
 #[derive(Debug, Clone)]

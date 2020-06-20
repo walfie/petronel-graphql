@@ -1,4 +1,4 @@
-use crate::metrics::{LangMetric, Metric, MetricFactory, PerBossMetrics, ServerMetrics};
+use crate::metrics::{LangMetric, Metric, MetricFactory, PerBossMetrics};
 use crate::model::{LangString, Language};
 use std::fmt;
 use std::fmt::Write;
@@ -59,6 +59,7 @@ pub struct PrometheusMetricFactory {
     boss_tweets_counter_header: String,
     boss_subscriptions_gauge_header: String,
     websocket_connections_gauge_header: String,
+    websocket_connections_gauge: PrometheusMetric,
 }
 
 impl PrometheusMetricFactory {
@@ -88,11 +89,17 @@ impl PrometheusMetricFactory {
             "gauge",
         );
 
+        let websocket_connections_gauge = {
+            let key = format!("{}_websocket_connections{{}}", prefix);
+            PrometheusMetric::new(key)
+        };
+
         Self {
             prefix,
             boss_tweets_counter_header,
             boss_subscriptions_gauge_header,
             websocket_connections_gauge_header,
+            websocket_connections_gauge,
         }
     }
 }
@@ -128,9 +135,8 @@ impl MetricFactory for PrometheusMetricFactory {
         PrometheusMetric::new(key)
     }
 
-    fn websocket_connections_gauge(&self) -> PrometheusMetric {
-        let key = format!("{}_websocket_connections{{}}", self.prefix);
-        PrometheusMetric::new(key)
+    fn websocket_connections_gauge(&self) -> &PrometheusMetric {
+        &self.websocket_connections_gauge
     }
 
     fn write_per_boss_metrics(&self, metrics: &PerBossMetrics<'_, Self::Metric>) -> Self::Output {
@@ -146,18 +152,10 @@ impl MetricFactory for PrometheusMetricFactory {
             writeln!(&mut out, "{}", metric).unwrap();
         }
 
-        writeln!(&mut out, "").unwrap();
-
-        out
-    }
-
-    fn write_server_metrics(&self, metrics: &ServerMetrics<Self::Metric>) -> Self::Output {
-        let mut out = String::new();
-
         writeln!(
             &mut out,
-            "{}\n{}\n",
-            self.websocket_connections_gauge_header, metrics.websocket_connections_gauge
+            "\n{}\n{}\n",
+            self.websocket_connections_gauge_header, self.websocket_connections_gauge
         )
         .unwrap();
 
@@ -220,6 +218,8 @@ mod test {
         counter.get(Language::Japanese).set(35);
         gauge.set(100);
 
+        factory.websocket_connections_gauge().set(10);
+
         let metrics = PerBossMetrics {
             boss_tweets_counters: vec![&counter],
             boss_subscriptions_gauges: vec![&gauge],
@@ -237,25 +237,6 @@ mod test {
             # TYPE petronel_subscriptions gauge
             petronel_subscriptions{name_ja="Lv60 オオゾラッコ",name_en="Lvl 60 Ozorotter"} 100
 
-            "#
-        );
-        assert_eq!(output, expected);
-    }
-
-    #[test]
-    fn fmt_server_metrics() {
-        let factory = PrometheusMetricFactory::new("petronel".to_owned());
-
-        let gauge = factory.websocket_connections_gauge();
-        gauge.set(10);
-
-        let metrics = ServerMetrics {
-            websocket_connections_gauge: gauge,
-        };
-
-        let output = factory.write_server_metrics(&metrics);
-        let expected = indoc!(
-            r#"
             # HELP petronel_websocket_connections Number of active websocket connections
             # TYPE petronel_websocket_connections gauge
             petronel_websocket_connections{} 10
