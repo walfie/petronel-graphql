@@ -4,7 +4,7 @@ use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 
 use crate::metrics::{
-    LangMetric, Metric, MetricFactory, Metrics, PrometheusMetric, PrometheusMetricFactory,
+    LangMetric, Metric, MetricFactory, PerBossMetrics, PrometheusMetric, PrometheusMetricFactory,
 };
 use crate::model::{Boss, BossName, CachedString, ImageHash, NodeId, Raid};
 
@@ -332,7 +332,7 @@ impl RaidHandlerInner {
     pub fn metrics(&self) -> <PrometheusMetricFactory as MetricFactory>::Output {
         let bosses = self.bosses();
 
-        let mut metrics = Metrics {
+        let mut metrics = PerBossMetrics {
             boss_tweets_counters: Vec::with_capacity(bosses.len()),
             boss_subscriptions_gauges: Vec::with_capacity(bosses.len()),
         };
@@ -345,7 +345,7 @@ impl RaidHandlerInner {
                 .push(&boss.subscriber_count);
         }
 
-        self.metric_factory.write(&metrics)
+        self.metric_factory.write_per_boss_metrics(&metrics)
     }
 
     pub fn update_image_hash(&self, boss_name: &BossName, image_hash: ImageHash) {

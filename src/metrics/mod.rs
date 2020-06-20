@@ -10,7 +10,7 @@ pub trait Metric: Clone {
     fn set(&self, value: usize);
 }
 
-pub struct Metrics<'m, M: Metric> {
+pub struct PerBossMetrics<'m, M: Metric> {
     pub boss_tweets_counters: Vec<&'m LangMetric<M>>,
     pub boss_subscriptions_gauges: Vec<&'m M>,
 }
@@ -21,7 +21,8 @@ pub trait MetricFactory {
 
     fn boss_tweets_counter(&self, name: &LangString) -> LangMetric<Self::Metric>;
     fn boss_subscriptions_gauge(&self, name: &LangString) -> Self::Metric;
-    fn write(&self, metrics: &Metrics<'_, Self::Metric>) -> Self::Output;
+
+    fn write_per_boss_metrics(&self, metrics: &PerBossMetrics<'_, Self::Metric>) -> Self::Output;
 }
 
 #[derive(Debug, Clone)]

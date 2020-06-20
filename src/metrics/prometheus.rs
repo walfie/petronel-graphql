@@ -1,4 +1,4 @@
-use crate::metrics::{LangMetric, Metric, MetricFactory, Metrics};
+use crate::metrics::{LangMetric, Metric, MetricFactory, PerBossMetrics};
 use crate::model::{LangString, Language};
 use std::fmt;
 use std::fmt::Write;
@@ -113,7 +113,7 @@ impl MetricFactory for PrometheusMetricFactory {
         PrometheusMetric::new(key)
     }
 
-    fn write(&self, metrics: &Metrics<'_, Self::Metric>) -> Self::Output {
+    fn write_per_boss_metrics(&self, metrics: &PerBossMetrics<'_, Self::Metric>) -> Self::Output {
         let mut out = String::new();
 
         writeln!(&mut out, "{}", self.boss_tweets_counter_header).unwrap();
@@ -185,12 +185,12 @@ mod test {
         counter.get(Language::Japanese).set(35);
         gauge.set(100);
 
-        let metrics = Metrics {
+        let metrics = PerBossMetrics {
             boss_tweets_counters: vec![&counter],
             boss_subscriptions_gauges: vec![&gauge],
         };
 
-        let output = factory.write(&metrics);
+        let output = factory.write_per_boss_metrics(&metrics);
         let expected = indoc!(
             r#"
             # HELP petronel_tweets_total Number of tweets seen for boss
