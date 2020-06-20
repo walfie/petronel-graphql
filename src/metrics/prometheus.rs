@@ -38,6 +38,10 @@ impl Metric for PrometheusMetric {
         self.value.fetch_add(1, Relaxed);
     }
 
+    fn dec(&self) {
+        self.value.fetch_sub(1, Relaxed);
+    }
+
     fn set(&self, value: usize) {
         self.value.store(value, Relaxed);
     }
