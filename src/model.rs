@@ -92,13 +92,36 @@ impl Boss {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct UserImage {
+    path: String,
+}
+
+impl UserImage {
+    const PREFIX: &'static str = "https://pbs.twimg.com/profile_images";
+
+    pub fn from_url(url: &str) -> Self {
+        Self {
+            path: url.trim_start_matches(Self::PREFIX).to_owned(),
+        }
+    }
+
+    pub fn as_path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn as_url(&self) -> String {
+        format!("{}{}", Self::PREFIX, self.path)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Raid {
     pub id: RaidId,
     pub tweet_id: TweetId,
     pub user_name: String,
     // TODO: Strip prefix "https://pbs.twimg.com/profile_images/" to reduce size of messages.
     // Include the full URL as a separate graphql field if requested.
-    pub user_image: Option<String>,
+    pub user_image: Option<UserImage>,
     pub boss_name: BossName,
     pub created_at: DateTimeString,
     pub text: Option<String>,

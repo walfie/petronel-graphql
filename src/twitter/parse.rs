@@ -1,4 +1,4 @@
-use crate::model::{Language, Raid};
+use crate::model::{Language, Raid, UserImage};
 use crate::twitter::model::Tweet;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -135,7 +135,7 @@ impl TryFrom<Tweet> for Raid {
         {
             None
         } else {
-            Some(tweet.user.profile_image_url_https.into())
+            Some(UserImage::from_url(&tweet.user.profile_image_url_https))
         };
 
         let raid = Raid {

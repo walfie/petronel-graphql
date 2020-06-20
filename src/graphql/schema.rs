@@ -166,10 +166,14 @@ impl Raid {
         &self.user_name
     }
 
-    /// Twitter user icon
-    #[graphql(name = "icon")]
-    fn user_image(&self) -> Option<&str> {
-        self.user_image.as_deref()
+    /// Twitter user icon path, relative to `https://pbs.twimg.com/profile_images`
+    fn icon_path(&self) -> Option<&str> {
+        self.user_image.as_ref().map(UserImage::as_path)
+    }
+
+    /// Twitter user icon URL
+    fn icon_url(&self) -> Option<String> {
+        self.user_image.as_ref().map(UserImage::as_url)
     }
 }
 
