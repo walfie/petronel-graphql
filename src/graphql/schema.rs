@@ -11,6 +11,7 @@ use futures::stream::Stream;
 use juniper::{
     Arguments, BoxFuture, DefaultScalarValue, ExecutionResult, Executor, GraphQLType, Selection,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(juniper::GraphQLScalarValue)]
 #[graphql(transparent, name = "ID")]
@@ -19,9 +20,17 @@ pub struct Id(String);
 #[derive(juniper::GraphQLScalarValue)]
 #[graphql(transparent, name = "DateTime")]
 /// An ISO-8601 encoded UTC date string.
-pub struct DateTime(String);
+pub struct GraphQlDateTime(String);
 
 pub struct Query;
+
+#[derive(juniper::GraphQLObject)]
+pub struct PageInfo {
+    has_previous_page: bool,
+    has_next_page: bool,
+    start_cursor: Option<String>,
+    end_cursor: Option<String>,
+}
 
 impl juniper::Context for RaidHandler {}
 
@@ -118,9 +127,130 @@ impl BossEntry {
     }
 
     /// List of raid tweets
+    /*
     fn tweets(&self) -> Vec<Arc<Raid>> {
         // TODO: Pagination
         self.history().read().iter().cloned().collect()
+    }
+    */
+
+    fn tweets(&self, first: i32, after: Option<String>) -> BossTweetsConnection {
+        let first = first as usize;
+        let cursor = after.and_then(|s| s.parse::<TweetCursor>().ok());
+        let all_tweets = self.history().read();
+
+        match cursor {
+            None => {
+                let tweets = all_tweets.iter().take(first).cloned().collect();
+                BossTweetsConnection {
+                    tweets,
+                    has_previous_page: false,
+                    has_next_page: first < all_tweets.len(),
+                }
+            }
+            Some(cursor) => {
+                let mut skipped = 0;
+                let tweets = all_tweets
+                    .iter()
+                    .skip_while(|tweet| {
+                        let created_at = tweet.created_at.as_datetime().timestamp_millis();
+                        if created_at >= cursor.created_at_millis {
+                            skipped += 1;
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .take(first)
+                    .cloned()
+                    .collect();
+
+                BossTweetsConnection {
+                    tweets,
+                    has_previous_page: skipped > 0,
+                    has_next_page: first + skipped < all_tweets.len(),
+                }
+            }
+        }
+    }
+}
+
+struct BossTweetsConnection {
+    tweets: Vec<Arc<Raid>>,
+    has_previous_page: bool,
+    has_next_page: bool,
+}
+
+// TODO: interfaces: [Connection]
+#[juniper::graphql_object]
+impl BossTweetsConnection {
+    fn edges(&self) -> Vec<BossTweetsEdge> {
+        self.tweets
+            .iter()
+            .map(|tweet| BossTweetsEdge {
+                node: tweet.clone(),
+            })
+            .collect()
+    }
+
+    fn nodes(&self) -> Vec<Arc<Raid>> {
+        self.tweets.clone()
+    }
+
+    fn page_info(&self) -> PageInfo {
+        let to_cursor = |tweet: &Arc<Raid>| TweetCursor::from(tweet.as_ref()).to_string();
+
+        PageInfo {
+            has_previous_page: self.has_previous_page,
+            has_next_page: self.has_next_page,
+            start_cursor: self.tweets.first().map(to_cursor),
+            end_cursor: self.tweets.last().map(to_cursor),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct TweetCursor {
+    created_at_millis: i64,
+}
+
+impl From<&Raid> for TweetCursor {
+    fn from(raid: &Raid) -> Self {
+        Self {
+            created_at_millis: raid.created_at.as_datetime().timestamp_millis(),
+        }
+    }
+}
+
+impl ToString for TweetCursor {
+    fn to_string(&self) -> String {
+        let bytes = postcard::to_allocvec(self).expect("failed to stringify TweetCursor");
+        bs58::encode(&bytes).into_string()
+    }
+}
+
+impl str::FromStr for TweetCursor {
+    type Err = ();
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let bytes = bs58::decode(input).into_vec().map_err(|_| ())?;
+        postcard::from_bytes(&bytes).map_err(|_| ())
+    }
+}
+
+struct BossTweetsEdge {
+    node: Arc<Raid>,
+}
+
+// TODO: interfaces: [Edge]
+#[juniper::graphql_object]
+impl BossTweetsEdge {
+    fn node(&self) -> &Arc<Raid> {
+        &self.node
+    }
+
+    fn cursor(&self) -> String {
+        TweetCursor::from(self.node.as_ref()).to_string()
     }
 }
 
@@ -157,8 +287,8 @@ impl Raid {
     }
 
     /// Tweet creation date
-    fn created_at(&self) -> DateTime {
-        DateTime(self.created_at.as_str().to_owned())
+    fn created_at(&self) -> GraphQlDateTime {
+        GraphQlDateTime(self.created_at.as_str().to_owned())
     }
 
     /// Twitter username
