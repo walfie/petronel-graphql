@@ -56,7 +56,7 @@ pub struct Options {
     pub connection_timeout: Duration,
 
     /// Number of tweets to retain for each boss
-    #[structopt(long, env, default_value = "10")]
+    #[structopt(long, env, default_value = "25")]
     pub raid_history_size: usize,
 
     /// Number of tweets and boss updates to keep around if consumers are lagging

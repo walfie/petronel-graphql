@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::str;
 use std::sync::Arc;
 
+use crate::graphql::relay::TweetCursor;
 use crate::model::*;
 use crate::raid_handler::{BossEntry, RaidHandler};
 
@@ -11,7 +12,6 @@ use futures::stream::Stream;
 use juniper::{
     Arguments, BoxFuture, DefaultScalarValue, ExecutionResult, Executor, GraphQLType, Selection,
 };
-use serde::{Deserialize, Serialize};
 
 #[derive(juniper::GraphQLScalarValue)]
 #[graphql(transparent, name = "ID")]
@@ -126,20 +126,12 @@ impl BossEntry {
         self.boss().level.map(|level| level as i32)
     }
 
-    /// List of raid tweets
-    /*
-    fn tweets(&self) -> Vec<Arc<Raid>> {
-        // TODO: Pagination
-        self.history().read().iter().cloned().collect()
-    }
-    */
-
-    fn tweets(&self, first: i32, after: Option<String>) -> BossTweetsConnection {
+    /// Raid tweets for this boss
+    fn tweets(&self, first: i32, after: Option<TweetCursor>) -> BossTweetsConnection {
         let first = first as usize;
-        let cursor = after.and_then(|s| s.parse::<TweetCursor>().ok());
         let all_tweets = self.history().read();
 
-        match cursor {
+        match after {
             None => {
                 let tweets = all_tweets.iter().take(first).cloned().collect();
                 BossTweetsConnection {
@@ -206,35 +198,6 @@ impl BossTweetsConnection {
             start_cursor: self.tweets.first().map(to_cursor),
             end_cursor: self.tweets.last().map(to_cursor),
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct TweetCursor {
-    created_at_millis: i64,
-}
-
-impl From<&Raid> for TweetCursor {
-    fn from(raid: &Raid) -> Self {
-        Self {
-            created_at_millis: raid.created_at.as_datetime().timestamp_millis(),
-        }
-    }
-}
-
-impl ToString for TweetCursor {
-    fn to_string(&self) -> String {
-        let bytes = postcard::to_allocvec(self).expect("failed to stringify TweetCursor");
-        bs58::encode(&bytes).into_string()
-    }
-}
-
-impl str::FromStr for TweetCursor {
-    type Err = ();
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let bytes = bs58::decode(input).into_vec().map_err(|_| ())?;
-        postcard::from_bytes(&bytes).map_err(|_| ())
     }
 }
 
