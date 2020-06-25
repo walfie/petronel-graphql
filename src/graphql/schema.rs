@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::str;
 use std::sync::Arc;
 
-use crate::graphql::relay::TweetCursor;
+use crate::graphql::relay::{Cursor, TweetCursor};
 use crate::model::*;
 use crate::raid_handler::{BossEntry, RaidHandler};
 
@@ -190,7 +190,7 @@ impl BossTweetsConnection {
     }
 
     fn page_info(&self) -> PageInfo {
-        let to_cursor = |tweet: &Arc<Raid>| TweetCursor::from(tweet.as_ref()).to_string();
+        let to_cursor = |tweet: &Arc<Raid>| TweetCursor::from(tweet.as_ref()).to_scalar_string();
 
         PageInfo {
             has_previous_page: self.has_previous_page,
@@ -213,7 +213,7 @@ impl BossTweetsEdge {
     }
 
     fn cursor(&self) -> String {
-        TweetCursor::from(self.node.as_ref()).to_string()
+        TweetCursor::from(self.node.as_ref()).to_scalar_string()
     }
 }
 
