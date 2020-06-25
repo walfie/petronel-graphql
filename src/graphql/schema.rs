@@ -190,7 +190,8 @@ impl BossTweetsConnection {
     }
 
     fn page_info(&self) -> PageInfo {
-        let to_cursor = |tweet: &Arc<Raid>| TweetCursor::from(tweet.as_ref()).to_scalar_string();
+        let to_cursor =
+            |tweet: &Arc<Raid>| TweetCursor::from_edge(tweet.as_ref()).to_scalar_string();
 
         PageInfo {
             has_previous_page: self.has_previous_page,
@@ -213,7 +214,7 @@ impl BossTweetsEdge {
     }
 
     fn cursor(&self) -> String {
-        TweetCursor::from(self.node.as_ref()).to_scalar_string()
+        TweetCursor::from_edge(self.node.as_ref()).to_scalar_string()
     }
 }
 

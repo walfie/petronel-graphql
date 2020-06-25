@@ -4,6 +4,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 pub trait Cursor: Serialize + DeserializeOwned {
+    type Edge;
+
     fn to_scalar_string(&self) -> String {
         let bytes = postcard::to_allocvec(self).expect("failed to stringify cursor");
         bs58::encode(&bytes).into_string()
@@ -13,6 +15,8 @@ pub trait Cursor: Serialize + DeserializeOwned {
         let bytes = bs58::decode(value).into_vec().ok()?;
         postcard::from_bytes(&bytes).ok()
     }
+
+    fn from_edge(edge: &Self::Edge) -> Self;
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -20,12 +24,12 @@ pub struct TweetCursor {
     pub created_at_millis: i64,
 }
 
-impl Cursor for TweetCursor {}
+impl Cursor for TweetCursor {
+    type Edge = Raid;
 
-impl From<&Raid> for TweetCursor {
-    fn from(raid: &Raid) -> Self {
+    fn from_edge(edge: &Self::Edge) -> Self {
         Self {
-            created_at_millis: raid.created_at.as_datetime().timestamp_millis(),
+            created_at_millis: edge.created_at.as_datetime().timestamp_millis(),
         }
     }
 }
