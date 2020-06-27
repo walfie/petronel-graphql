@@ -63,8 +63,9 @@ pub trait Cursor: Serialize + DeserializeOwned {
         let mut skipped = 0;
 
         // If `after` is specified, skip until we see the cursor
-        // TODO: The pagination algorithm in the graphql spec states that if the cursor doesn't
-        // exist, don't slice the edges
+        // This differs from the pagination algorithm in the Relay spec, since it will return
+        // nothing if the cursor doesn't point to a valid item, but whatever.
+        // https://relay.dev/graphql/connections.htm#sec-Pagination-algorithm
         if let Some(cursor) = after {
             while let Some(edge) = edges.next() {
                 skipped += 1;
