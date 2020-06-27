@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::str;
 use std::sync::Arc;
 
-use crate::graphql::relay::{Cursor, PageInfo, TweetCursor};
+use crate::graphql::relay::{BossCursor, Cursor, PageInfo, TweetCursor};
 use crate::model::*;
 use crate::raid_handler::{BossEntry, RaidHandler};
 
@@ -53,9 +53,27 @@ impl Query {
         ids.iter().map(|id| get_node(ctx, &id.0)).collect()
     }
 
-    // TODO: pagination, first/last, etc
-    fn bosses(&self, ctx: &RaidHandler) -> Vec<Arc<BossEntry>> {
-        ctx.bosses().clone()
+    fn bosses(
+        &self,
+        ctx: &RaidHandler,
+        first: Option<i32>,
+        after: Option<BossCursor>,
+        last: Option<i32>,
+        before: Option<BossCursor>,
+    ) -> FieldResult<BossesConnection> {
+        let all_bosses = ctx.bosses().clone();
+
+        let (bosses, page_info) = BossCursor::paginate(
+            all_bosses.iter(),
+            all_bosses.len(),
+            Arc::clone,
+            first,
+            after,
+            last,
+            before,
+        )?;
+
+        Ok(BossesConnection { bosses, page_info })
     }
 
     fn boss(&self, ctx: &RaidHandler, name: String) -> Option<Arc<BossEntry>> {
@@ -134,6 +152,46 @@ impl BossEntry {
             TweetCursor::paginate(iter, tweet_count, Arc::clone, first, after, last, before)?;
 
         Ok(BossTweetsConnection { tweets, page_info })
+    }
+}
+
+struct BossesConnection {
+    bosses: Vec<Arc<BossEntry>>,
+    page_info: PageInfo,
+}
+
+// TODO: interfaces: [Connection]
+#[juniper::graphql_object]
+impl BossesConnection {
+    fn edges(&self) -> Vec<BossesEdge> {
+        self.bosses
+            .iter()
+            .map(|boss| BossesEdge { node: boss.clone() })
+            .collect()
+    }
+
+    fn nodes(&self) -> &[Arc<BossEntry>] {
+        &self.bosses
+    }
+
+    fn page_info(&self) -> &PageInfo {
+        &self.page_info
+    }
+}
+
+struct BossesEdge {
+    node: Arc<BossEntry>,
+}
+
+// TODO: interfaces: [Edge]
+#[juniper::graphql_object]
+impl BossesEdge {
+    fn node(&self) -> &Arc<BossEntry> {
+        &self.node
+    }
+
+    fn cursor(&self) -> String {
+        BossCursor::from_edge(&self.node).to_scalar_string()
     }
 }
 

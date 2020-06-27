@@ -1,4 +1,6 @@
-use crate::model::{Raid, TweetId};
+use crate::model::{CachedString, Raid, TweetId};
+use crate::raid_handler::BossEntry;
+
 use juniper::{FieldResult, IntoFieldResult};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -156,6 +158,62 @@ impl Cursor for TweetCursor {
 
 #[juniper::graphql_scalar]
 impl<S> GraphQLScalar for TweetCursor
+where
+    S: juniper::ScalarValue,
+{
+    fn resolve(&self) -> juniper::Value {
+        juniper::Value::scalar(self.to_scalar_string())
+    }
+
+    fn from_input_value(value: &juniper::InputValue) -> Option<Self> {
+        let input = value.as_string_value()?;
+        Self::from_scalar_string(input)
+    }
+
+    fn from_str<'a>(value: juniper::ScalarToken<'a>) -> juniper::ParseScalarResult<'a, S> {
+        <String as juniper::ParseScalarValue<S>>::from_str(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BossCursor {
+    pub boss_name: CachedString,
+}
+
+impl Cursor for BossCursor {
+    type Edge = BossEntry;
+
+    fn from_edge(edge: &Self::Edge) -> Self {
+        Self {
+            boss_name: edge
+                .boss()
+                .name
+                .canonical()
+                .expect("boss name was somehow None")
+                .clone(),
+        }
+    }
+
+    fn matches_edge(&self, edge: &Self::Edge) -> bool {
+        // Adapted from unstable `Option::contains` in the standard library
+        pub fn option_contains<T, U>(opt: &Option<T>, x: &U) -> bool
+        where
+            U: PartialEq<T>,
+        {
+            match opt {
+                Some(y) => x == y,
+                None => false,
+            }
+        }
+
+        let name = &edge.boss().name;
+
+        option_contains(&name.ja, &self.boss_name) || option_contains(&name.en, &self.boss_name)
+    }
+}
+
+#[juniper::graphql_scalar]
+impl<S> GraphQLScalar for BossCursor
 where
     S: juniper::ScalarValue,
 {
