@@ -184,33 +184,33 @@ mod test {
         }
     }
 
+    struct TestCase {
+        first: Option<i32>,
+        after: Option<TestCursor>,
+        last: Option<i32>,
+        before: Option<TestCursor>,
+    }
+
+    impl TestCase {
+        fn run(&self) -> FieldResult<(Vec<usize>, PageInfo)> {
+            let all_edges = (0..=100).map(Arc::new).collect::<Vec<Arc<usize>>>();
+
+            let output = TestCursor::paginate(
+                all_edges.iter(),
+                all_edges.len(),
+                |arc| **arc,
+                self.first,
+                self.after.clone(),
+                self.last,
+                self.before.clone(),
+            );
+
+            output
+        }
+    }
+
     #[test]
     fn pagination() {
-        struct TestCase {
-            first: Option<i32>,
-            after: Option<TestCursor>,
-            last: Option<i32>,
-            before: Option<TestCursor>,
-        }
-
-        impl TestCase {
-            fn run(&self) -> FieldResult<(Vec<usize>, PageInfo)> {
-                let all_edges = (0..=100).map(Arc::new).collect::<Vec<Arc<usize>>>();
-
-                let output = TestCursor::paginate(
-                    all_edges.iter(),
-                    all_edges.len(),
-                    |arc| **arc,
-                    self.first,
-                    self.after.clone(),
-                    self.last,
-                    self.before.clone(),
-                );
-
-                output
-            }
-        }
-
         // Pagination with `first` only, when requesting more items than exist
         assert_eq!(
             TestCase {
@@ -295,6 +295,27 @@ mod test {
             )
         );
 
+        // Pagination with `first` and `after`, but the `after` cursor doesn't exist
+        assert_eq!(
+            TestCase {
+                first: Some(10),
+                after: Some(TestCursor(43253)),
+                last: None,
+                before: None,
+            }
+            .run()
+            .unwrap(),
+            (
+                vec![],
+                PageInfo {
+                    has_previous_page: true,
+                    has_next_page: false,
+                    start_cursor: None,
+                    end_cursor: None,
+                }
+            )
+        );
+
         // Pagination with `last` only, when requesting more items than exist
         assert_eq!(
             TestCase {
@@ -375,6 +396,111 @@ mod test {
                     has_next_page: true,
                     start_cursor: Some(TestCursor(0).to_scalar_string()),
                     end_cursor: Some(TestCursor(4).to_scalar_string()),
+                }
+            )
+        );
+
+        // Pagination with `last` and `before`, but the `before` cursor doesn't exist
+        assert_eq!(
+            TestCase {
+                first: None,
+                after: None,
+                last: Some(10),
+                before: Some(TestCursor(3532)),
+            }
+            .run()
+            .unwrap(),
+            (
+                (91..=100).collect(),
+                PageInfo {
+                    has_previous_page: true,
+                    has_next_page: false,
+                    start_cursor: Some(TestCursor(91).to_scalar_string()),
+                    end_cursor: Some(TestCursor(100).to_scalar_string()),
+                }
+            )
+        );
+
+        // Pagination with `first`, `after`, and `before`
+        assert_eq!(
+            TestCase {
+                first: Some(10),
+                after: Some(TestCursor(40)),
+                last: None,
+                before: Some(TestCursor(60)),
+            }
+            .run()
+            .unwrap(),
+            (
+                (41..=50).collect(),
+                PageInfo {
+                    has_previous_page: true,
+                    has_next_page: true,
+                    start_cursor: Some(TestCursor(41).to_scalar_string()),
+                    end_cursor: Some(TestCursor(50).to_scalar_string()),
+                }
+            )
+        );
+
+        // Pagination with `last`, `after`, and `before`
+        assert_eq!(
+            TestCase {
+                first: None,
+                after: Some(TestCursor(40)),
+                last: Some(10),
+                before: Some(TestCursor(60)),
+            }
+            .run()
+            .unwrap(),
+            (
+                (50..=59).collect(),
+                PageInfo {
+                    has_previous_page: true,
+                    has_next_page: true,
+                    start_cursor: Some(TestCursor(50).to_scalar_string()),
+                    end_cursor: Some(TestCursor(59).to_scalar_string()),
+                }
+            )
+        );
+
+        // Pagination with `first`, `after`, and `before`, with a large `first`
+        assert_eq!(
+            TestCase {
+                first: Some(50),
+                after: Some(TestCursor(40)),
+                last: None,
+                before: Some(TestCursor(60)),
+            }
+            .run()
+            .unwrap(),
+            (
+                (41..=59).collect(),
+                PageInfo {
+                    has_previous_page: true,
+                    has_next_page: true,
+                    start_cursor: Some(TestCursor(41).to_scalar_string()),
+                    end_cursor: Some(TestCursor(59).to_scalar_string()),
+                }
+            )
+        );
+
+        // Pagination with `last`, `after`, and `before`, with a large `last`
+        assert_eq!(
+            TestCase {
+                first: None,
+                after: Some(TestCursor(40)),
+                last: Some(50),
+                before: Some(TestCursor(60)),
+            }
+            .run()
+            .unwrap(),
+            (
+                (41..=59).collect(),
+                PageInfo {
+                    has_previous_page: true,
+                    has_next_page: true,
+                    start_cursor: Some(TestCursor(41).to_scalar_string()),
+                    end_cursor: Some(TestCursor(59).to_scalar_string()),
                 }
             )
         );
