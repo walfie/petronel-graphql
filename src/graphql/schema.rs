@@ -164,7 +164,6 @@ struct BossesConnection {
     page_info: PageInfo,
 }
 
-// TODO: interfaces: [Connection]
 #[juniper::graphql_object]
 impl BossesConnection {
     fn edges(&self) -> Vec<BossesEdge> {
@@ -187,7 +186,6 @@ struct BossesEdge {
     node: Arc<BossEntry>,
 }
 
-// TODO: interfaces: [Edge]
 #[juniper::graphql_object]
 impl BossesEdge {
     fn node(&self) -> &Arc<BossEntry> {
@@ -204,7 +202,6 @@ struct BossTweetsConnection {
     page_info: PageInfo,
 }
 
-// TODO: interfaces: [Connection]
 #[juniper::graphql_object]
 impl BossTweetsConnection {
     fn edges(&self) -> Vec<BossTweetsEdge> {
@@ -229,7 +226,6 @@ struct BossTweetsEdge {
     node: Arc<Raid>,
 }
 
-// TODO: interfaces: [Edge]
 #[juniper::graphql_object]
 impl BossTweetsEdge {
     fn node(&self) -> &Arc<Raid> {
