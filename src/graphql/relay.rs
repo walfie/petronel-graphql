@@ -12,7 +12,7 @@ pub struct PageInfo {
     pub end_cursor: Option<String>,
 }
 
-pub trait Cursor: Serialize + DeserializeOwned + PartialEq {
+pub trait Cursor: Serialize + DeserializeOwned {
     type Edge;
 
     fn to_scalar_string(&self) -> String {
@@ -26,6 +26,7 @@ pub trait Cursor: Serialize + DeserializeOwned + PartialEq {
     }
 
     fn from_edge(edge: &Self::Edge) -> Self;
+    fn matches_edge(&self, edge: &Self::Edge) -> bool;
 
     fn paginate<E, I, F, Out>(
         mut edges: I,
@@ -65,7 +66,7 @@ pub trait Cursor: Serialize + DeserializeOwned + PartialEq {
         if let Some(cursor) = after {
             while let Some(edge) = edges.next() {
                 skipped += 1;
-                if Self::from_edge(edge.as_ref()) == cursor {
+                if cursor.matches_edge(edge.as_ref()) {
                     break;
                 }
             }
@@ -83,7 +84,7 @@ pub trait Cursor: Serialize + DeserializeOwned + PartialEq {
                 let mut taken = 0;
 
                 while let Some(edge) = edges.next() {
-                    if taken < count && Self::from_edge(edge.as_ref()) != before {
+                    if taken < count && !before.matches_edge(edge.as_ref()) {
                         out.push(map_fn(edge));
                         taken += 1;
                     } else {
@@ -106,7 +107,7 @@ pub trait Cursor: Serialize + DeserializeOwned + PartialEq {
             (FirstOrLast::Last(count), Some(before)) => {
                 // This is highly inefficient. TODO: Maybe use reversible iterator
                 let mut out = edges
-                    .take_while(|edge| Self::from_edge(edge.as_ref()) != before)
+                    .take_while(|edge| !before.matches_edge(edge.as_ref()))
                     .map(map_fn)
                     .collect::<Vec<Out>>();
 
@@ -147,6 +148,10 @@ impl Cursor for TweetCursor {
             tweet_id: edge.tweet_id,
         }
     }
+
+    fn matches_edge(&self, edge: &Self::Edge) -> bool {
+        self.tweet_id == edge.tweet_id
+    }
 }
 
 #[juniper::graphql_scalar]
@@ -181,6 +186,10 @@ mod test {
 
         fn from_edge(edge: &Self::Edge) -> Self {
             Self(edge.clone())
+        }
+
+        fn matches_edge(&self, edge: &Self::Edge) -> bool {
+            self.0 == *edge
         }
     }
 
