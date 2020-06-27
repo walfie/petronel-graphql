@@ -1,4 +1,4 @@
-use crate::model::Raid;
+use crate::model::{Raid, TweetId};
 use juniper::{FieldResult, IntoFieldResult};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -136,7 +136,7 @@ pub trait Cursor: Serialize + DeserializeOwned + PartialEq {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TweetCursor {
-    pub created_at_millis: i64,
+    pub tweet_id: TweetId,
 }
 
 impl Cursor for TweetCursor {
@@ -144,7 +144,7 @@ impl Cursor for TweetCursor {
 
     fn from_edge(edge: &Self::Edge) -> Self {
         Self {
-            created_at_millis: edge.created_at.as_datetime().timestamp_millis(),
+            tweet_id: edge.tweet_id,
         }
     }
 }
