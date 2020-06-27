@@ -3,14 +3,15 @@ use std::pin::Pin;
 use std::str;
 use std::sync::Arc;
 
-use crate::graphql::relay::{Cursor, TweetCursor};
+use crate::graphql::relay::{Cursor, PageInfo, TweetCursor};
 use crate::model::*;
 use crate::raid_handler::{BossEntry, RaidHandler};
 
 use futures::future::ready;
 use futures::stream::Stream;
 use juniper::{
-    Arguments, BoxFuture, DefaultScalarValue, ExecutionResult, Executor, GraphQLType, Selection,
+    Arguments, BoxFuture, DefaultScalarValue, ExecutionResult, Executor, FieldResult, GraphQLType,
+    Selection,
 };
 
 #[derive(juniper::GraphQLScalarValue)]
@@ -23,14 +24,6 @@ pub struct Id(String);
 pub struct GraphQlDateTime(String);
 
 pub struct Query;
-
-#[derive(juniper::GraphQLObject)]
-pub struct PageInfo {
-    has_previous_page: bool,
-    has_next_page: bool,
-    start_cursor: Option<String>,
-    end_cursor: Option<String>,
-}
 
 impl juniper::Context for RaidHandler {}
 
@@ -127,50 +120,26 @@ impl BossEntry {
     }
 
     /// Raid tweets for this boss
-    fn tweets(&self, first: i32, after: Option<TweetCursor>) -> BossTweetsConnection {
-        let first = first as usize;
+    fn tweets(
+        &self,
+        first: Option<i32>,
+        after: Option<TweetCursor>,
+        last: Option<i32>,
+        before: Option<TweetCursor>,
+    ) -> FieldResult<BossTweetsConnection> {
         let all_tweets = self.history().read();
+        let tweet_count = all_tweets.len();
+        let iter = all_tweets.iter();
+        let (tweets, page_info) =
+            TweetCursor::paginate(iter, tweet_count, Arc::clone, first, after, last, before)?;
 
-        match after {
-            None => {
-                let tweets = all_tweets.iter().take(first).cloned().collect();
-                BossTweetsConnection {
-                    tweets,
-                    has_previous_page: false,
-                    has_next_page: first < all_tweets.len(),
-                }
-            }
-            Some(cursor) => {
-                let mut skipped = 0;
-                let tweets = all_tweets
-                    .iter()
-                    .skip_while(|tweet| {
-                        let created_at = tweet.created_at.as_datetime().timestamp_millis();
-                        if created_at >= cursor.created_at_millis {
-                            skipped += 1;
-                            true
-                        } else {
-                            false
-                        }
-                    })
-                    .take(first)
-                    .cloned()
-                    .collect();
-
-                BossTweetsConnection {
-                    tweets,
-                    has_previous_page: skipped > 0,
-                    has_next_page: first + skipped < all_tweets.len(),
-                }
-            }
-        }
+        Ok(BossTweetsConnection { tweets, page_info })
     }
 }
 
 struct BossTweetsConnection {
     tweets: Vec<Arc<Raid>>,
-    has_previous_page: bool,
-    has_next_page: bool,
+    page_info: PageInfo,
 }
 
 // TODO: interfaces: [Connection]
@@ -185,20 +154,12 @@ impl BossTweetsConnection {
             .collect()
     }
 
-    fn nodes(&self) -> Vec<Arc<Raid>> {
-        self.tweets.clone()
+    fn nodes(&self) -> &[Arc<Raid>] {
+        &self.tweets
     }
 
-    fn page_info(&self) -> PageInfo {
-        let to_cursor =
-            |tweet: &Arc<Raid>| TweetCursor::from_edge(tweet.as_ref()).to_scalar_string();
-
-        PageInfo {
-            has_previous_page: self.has_previous_page,
-            has_next_page: self.has_next_page,
-            start_cursor: self.tweets.first().map(to_cursor),
-            end_cursor: self.tweets.last().map(to_cursor),
-        }
+    fn page_info(&self) -> &PageInfo {
+        &self.page_info
     }
 }
 
@@ -214,7 +175,7 @@ impl BossTweetsEdge {
     }
 
     fn cursor(&self) -> String {
-        TweetCursor::from_edge(self.node.as_ref()).to_scalar_string()
+        TweetCursor::from_edge(&self.node).to_scalar_string()
     }
 }
 
