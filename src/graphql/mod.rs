@@ -1,3 +1,4 @@
+mod relay;
 mod schema;
 
 use crate::metrics::{Metric, MetricFactory};

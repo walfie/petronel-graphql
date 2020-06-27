@@ -3,13 +3,15 @@ use std::pin::Pin;
 use std::str;
 use std::sync::Arc;
 
+use crate::graphql::relay::{BossCursor, Cursor, PageInfo, TweetCursor};
 use crate::model::*;
 use crate::raid_handler::{BossEntry, RaidHandler};
 
 use futures::future::ready;
 use futures::stream::Stream;
 use juniper::{
-    Arguments, BoxFuture, DefaultScalarValue, ExecutionResult, Executor, GraphQLType, Selection,
+    Arguments, BoxFuture, DefaultScalarValue, ExecutionResult, Executor, FieldResult, GraphQLType,
+    Selection,
 };
 
 #[derive(juniper::GraphQLScalarValue)]
@@ -19,7 +21,7 @@ pub struct Id(String);
 #[derive(juniper::GraphQLScalarValue)]
 #[graphql(transparent, name = "DateTime")]
 /// An ISO-8601 encoded UTC date string.
-pub struct DateTime(String);
+pub struct GraphQlDateTime(String);
 
 pub struct Query;
 
@@ -40,10 +42,12 @@ fn get_node(raid_handler: &RaidHandler, id: &str) -> Option<Node> {
 
 #[juniper::graphql_object(Context = RaidHandler)]
 impl Query {
+    /// Fetches an object given its ID.
     fn node(&self, ctx: &RaidHandler, id: Id) -> Option<Node> {
         get_node(ctx, &id.0)
     }
 
+    /// Fetches a list of objects given their IDs.
     fn nodes(&self, ctx: &RaidHandler, ids: Vec<Id>) -> Vec<Option<Node>> {
         // TODO: Could be optimized more for tweets. The IDs requested could be multiple tweets
         // from the same boss, but we currently iterate through the list once for each requested
@@ -51,11 +55,31 @@ impl Query {
         ids.iter().map(|id| get_node(ctx, &id.0)).collect()
     }
 
-    // TODO: pagination, first/last, etc
-    fn bosses(&self, ctx: &RaidHandler) -> Vec<Arc<BossEntry>> {
-        ctx.bosses().clone()
+    /// A list of bosses
+    fn bosses(
+        &self,
+        ctx: &RaidHandler,
+        first: Option<i32>,
+        after: Option<BossCursor>,
+        last: Option<i32>,
+        before: Option<BossCursor>,
+    ) -> FieldResult<BossesConnection> {
+        let all_bosses = ctx.bosses().clone();
+
+        let (bosses, page_info) = BossCursor::paginate(
+            all_bosses.iter(),
+            all_bosses.len(),
+            Arc::clone,
+            first,
+            after,
+            last,
+            before,
+        )?;
+
+        Ok(BossesConnection { bosses, page_info })
     }
 
+    /// An individual boss
     fn boss(&self, ctx: &RaidHandler, name: String) -> Option<Arc<BossEntry>> {
         ctx.boss(&name.into())
     }
@@ -117,10 +141,99 @@ impl BossEntry {
         self.boss().level.map(|level| level as i32)
     }
 
-    /// List of raid tweets
-    fn tweets(&self) -> Vec<Arc<Raid>> {
-        // TODO: Pagination
-        self.history().read().iter().cloned().collect()
+    /// A list of raid tweets for this boss
+    fn tweets(
+        &self,
+        first: Option<i32>,
+        after: Option<TweetCursor>,
+        last: Option<i32>,
+        before: Option<TweetCursor>,
+    ) -> FieldResult<BossTweetsConnection> {
+        let all_tweets = self.history().read();
+        let tweet_count = all_tweets.len();
+        let iter = all_tweets.iter();
+        let (tweets, page_info) =
+            TweetCursor::paginate(iter, tweet_count, Arc::clone, first, after, last, before)?;
+
+        Ok(BossTweetsConnection { tweets, page_info })
+    }
+}
+
+struct BossesConnection {
+    bosses: Vec<Arc<BossEntry>>,
+    page_info: PageInfo,
+}
+
+#[juniper::graphql_object]
+impl BossesConnection {
+    fn edges(&self) -> Vec<BossesEdge> {
+        self.bosses
+            .iter()
+            .map(|boss| BossesEdge { node: boss.clone() })
+            .collect()
+    }
+
+    fn nodes(&self) -> &[Arc<BossEntry>] {
+        &self.bosses
+    }
+
+    fn page_info(&self) -> &PageInfo {
+        &self.page_info
+    }
+}
+
+struct BossesEdge {
+    node: Arc<BossEntry>,
+}
+
+#[juniper::graphql_object]
+impl BossesEdge {
+    fn node(&self) -> &Arc<BossEntry> {
+        &self.node
+    }
+
+    fn cursor(&self) -> String {
+        BossCursor::from_edge(&self.node).to_scalar_string()
+    }
+}
+
+struct BossTweetsConnection {
+    tweets: Vec<Arc<Raid>>,
+    page_info: PageInfo,
+}
+
+#[juniper::graphql_object]
+impl BossTweetsConnection {
+    fn edges(&self) -> Vec<BossTweetsEdge> {
+        self.tweets
+            .iter()
+            .map(|tweet| BossTweetsEdge {
+                node: tweet.clone(),
+            })
+            .collect()
+    }
+
+    fn nodes(&self) -> &[Arc<Raid>] {
+        &self.tweets
+    }
+
+    fn page_info(&self) -> &PageInfo {
+        &self.page_info
+    }
+}
+
+struct BossTweetsEdge {
+    node: Arc<Raid>,
+}
+
+#[juniper::graphql_object]
+impl BossTweetsEdge {
+    fn node(&self) -> &Arc<Raid> {
+        &self.node
+    }
+
+    fn cursor(&self) -> String {
+        TweetCursor::from_edge(&self.node).to_scalar_string()
     }
 }
 
@@ -157,8 +270,8 @@ impl Raid {
     }
 
     /// Tweet creation date
-    fn created_at(&self) -> DateTime {
-        DateTime(self.created_at.as_str().to_owned())
+    fn created_at(&self) -> GraphQlDateTime {
+        GraphQlDateTime(self.created_at.as_str().to_owned())
     }
 
     /// Twitter username
