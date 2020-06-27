@@ -83,12 +83,10 @@ pub trait Cursor: Serialize + DeserializeOwned {
             (FirstOrLast::First(count), Some(before)) => {
                 // If `before` is specified, take until we see the cursor
                 let mut out = Vec::with_capacity(count);
-                let mut taken = 0;
 
                 while let Some(edge) = edges.next() {
-                    if taken < count && !before.matches_edge(edge.as_ref()) {
+                    if out.len() < count && !before.matches_edge(edge.as_ref()) {
                         out.push(map_fn(edge));
-                        taken += 1;
                     } else {
                         break;
                     }
