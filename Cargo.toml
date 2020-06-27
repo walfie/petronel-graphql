@@ -5,39 +5,49 @@ authors = ["Walfie <walfington@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0.28"
-arc-swap = "0.4.6"
-async-trait = "0.1.31"
+anyhow = "1.0.31"
+arc-swap = "0.4.7"
+async-trait = "0.1.36"
 bs58 = "0.3.1"
 chrono = { version = "0.4.11", features = ["serde"] }
-circular-queue = "0.2.4"
-dashmap = "4.0.0-rc4"
+circular-queue = "0.2.5"
+dashmap = "4.0.0-rc6"
 escaper = "0.1.0"
 futures = "0.3.5"
 http = "0.2.1"
-hyper = "0.13.5"
+hyper = "0.13.6"
 hyper-tls = "0.4.1"
-image = "0.23.4"
-juniper = { git = "https://github.com/graphql-rust/juniper.git" }
-juniper_subscriptions = { git = "https://github.com/graphql-rust/juniper.git" }
-juniper_warp = { git = "https://github.com/graphql-rust/juniper.git", features = ["subscriptions"] }
-once_cell = "1.3.1"
-parking_lot = "0.10.2"
-pin-project-lite = "0.1.5"
+image = "0.23.6"
+once_cell = "1.4.0"
+parking_lot = "0.11.0"
+pin-project-lite = "0.1.7"
 postcard = { version = "0.5.0", default-features = false, features = ["alloc"] }
 redis = { version = "0.16.0", default-features = false, features = ["tokio-comp", "connection-manager"] }
-regex = "1.3.7"
-serde = { version = "1.0.107", features = ["derive"] }
-serde_json = "1.0.52"
+regex = "1.3.9"
+serde = { version = "1.0.114", features = ["derive"] }
+serde_json = "1.0.55"
 slog = "2.5.2"
 slog-async = "2.5.0"
 slog-json = "2.3.0"
-slog-term = "2.5.0"
+slog-term = "2.6.0"
 string_cache = "0.8.0"
-structopt = "0.3.14"
-thiserror = "1.0.16"
+structopt = "0.3.15"
+thiserror = "1.0.20"
 twitter-stream = "0.10.0-alpha.6"
-warp = "0.2.2"
+warp = "0.2.3"
+
+[dependencies.juniper]
+git = "https://github.com/graphql-rust/juniper.git"
+rev = "37a37d462ff680dab14776e602b506a8a0092e8d"
+
+[dependencies.juniper_subscriptions]
+git = "https://github.com/graphql-rust/juniper.git"
+rev = "37a37d462ff680dab14776e602b506a8a0092e8d"
+
+[dependencies.juniper_warp]
+git = "https://github.com/graphql-rust/juniper.git"
+rev = "37a37d462ff680dab14776e602b506a8a0092e8d"
+features = ["subscriptions"]
 
 [dependencies.tokio]
 version = "0.2.21"
@@ -45,7 +55,7 @@ features = ["full", "sync", "time", "stream", "parking_lot", "rt-threaded"]
 
 [dev-dependencies]
 itertools = "0.9.0"
-indoc = "0.3.5"
+indoc = "0.3.6"
 maplit = "1.0.2"
 
 [features]
