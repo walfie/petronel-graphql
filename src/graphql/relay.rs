@@ -184,14 +184,12 @@ impl Cursor for BossCursor {
     type Edge = BossEntry;
 
     fn from_edge(edge: &Self::Edge) -> Self {
-        Self {
-            boss_name: edge
-                .boss()
-                .name
-                .canonical()
-                .expect("boss name was somehow None")
-                .clone(),
-        }
+        let boss_name = match edge.boss().name.canonical() {
+            Some(name) => name.clone(),
+            None => "".into(), // This should not occur in normal usage
+        };
+
+        Self { boss_name }
     }
 
     fn matches_edge(&self, edge: &Self::Edge) -> bool {
