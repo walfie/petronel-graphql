@@ -42,10 +42,12 @@ fn get_node(raid_handler: &RaidHandler, id: &str) -> Option<Node> {
 
 #[juniper::graphql_object(Context = RaidHandler)]
 impl Query {
+    /// Fetches an object given its ID.
     fn node(&self, ctx: &RaidHandler, id: Id) -> Option<Node> {
         get_node(ctx, &id.0)
     }
 
+    /// Fetches a list of objects given their IDs.
     fn nodes(&self, ctx: &RaidHandler, ids: Vec<Id>) -> Vec<Option<Node>> {
         // TODO: Could be optimized more for tweets. The IDs requested could be multiple tweets
         // from the same boss, but we currently iterate through the list once for each requested
@@ -53,6 +55,7 @@ impl Query {
         ids.iter().map(|id| get_node(ctx, &id.0)).collect()
     }
 
+    /// A list of bosses
     fn bosses(
         &self,
         ctx: &RaidHandler,
@@ -76,6 +79,7 @@ impl Query {
         Ok(BossesConnection { bosses, page_info })
     }
 
+    /// An individual boss
     fn boss(&self, ctx: &RaidHandler, name: String) -> Option<Arc<BossEntry>> {
         ctx.boss(&name.into())
     }
@@ -137,7 +141,7 @@ impl BossEntry {
         self.boss().level.map(|level| level as i32)
     }
 
-    /// Raid tweets for this boss
+    /// A list of raid tweets for this boss
     fn tweets(
         &self,
         first: Option<i32>,
