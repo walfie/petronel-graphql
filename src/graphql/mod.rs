@@ -74,7 +74,7 @@ pub fn routes(handler: RaidHandler) -> impl Filter<Extract = impl warp::Reply> +
     let cors = warp::cors()
         .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
-        .allow_header("*")
+        .allow_headers(vec!["accept", "content-type"])
         .max_age(86400);
 
     let routes = post_graphql
