@@ -155,7 +155,7 @@ impl Cursor for TweetCursor {
     }
 }
 
-#[juniper::graphql_scalar]
+#[juniper::graphql_scalar(name = "String")]
 impl<S> GraphQLScalar for TweetCursor
 where
     S: juniper::ScalarValue,
@@ -209,7 +209,7 @@ impl Cursor for BossCursor {
     }
 }
 
-#[juniper::graphql_scalar]
+#[juniper::graphql_scalar(name = "String")]
 impl<S> GraphQLScalar for BossCursor
 where
     S: juniper::ScalarValue,
